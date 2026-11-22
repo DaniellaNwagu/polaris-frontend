@@ -1,4 +1,4 @@
-import { contract } from '@stellar/stellar-sdk';
+import type { contract } from '@stellar/stellar-sdk';
 import Freighter from '@stellar/freighter-api';
 import { api } from './api';
 import { config } from './config';
@@ -145,12 +145,41 @@ type TradeContract = Record<
 >;
 
 /**
+ * Contract specs are immutable per deployed WASM, so caching them by WASM
+ * hash is safe and lets every market sharing one WASM reuse a single fetch.
+ * Keyed by hash (not contract id) so a redeploy with a new WASM version
+ * never collides with a stale spec. `contract.Client.from` is only called
+ * on a cache miss; subsequent trades build `new contract.Client(spec, …)`
+ * directly, skipping the extra RPC round trip and WASM download.
+ */
+const specCache = new Map<string, contract.Spec>();
+
+async function getContractSpec(
+  contractId: string,
+  rpcUrl: string,
+  networkPassphrase: string,
+): Promise<contract.Spec> {
+  const { contract, rpc } = await import('@stellar/stellar-sdk');
+  const server = new rpc.Server(rpcUrl);
+  const wasmHash = (await server.getContractWasmByContractId(contractId)).toString('hex');
+  const cached = specCache.get(wasmHash);
+  if (cached) return cached;
+
+  // Cache miss: let the SDK fetch the spec once, then reuse it for every
+  // other contract sharing this WASM hash.
+  const client = await contract.Client.from({ contractId, rpcUrl, networkPassphrase });
+  const spec = client.spec;
+  specCache.set(wasmHash, spec);
+  return spec;
+}
+
+/**
  * Runs a market/perpetual contract call authorized by the stored wallet.
  *
  * - `'freighter'`: builds, simulates, and signs the transaction directly
- *   against Soroban RPC — `contract.Client.from` fetches the contract's
- *   real interface from the network (no bundled wasm/spec needed), and
- *   Freighter's own `signTransaction` plugs in as the client's signer
+ *   against Soroban RPC — the contract's real interface is fetched from the
+ *   network once per WASM hash and cached (no bundled wasm/spec needed),
+ *   and Freighter's own `signTransaction` plugs in as the client's signer
  *   as-is (the SDK's `Signer` type is documented to match it exactly). No
  *   backend relay, no sponsored fee — the connected wallet pays its own,
  *   same as any other Soroban dapp.
@@ -180,7 +209,13 @@ export async function callAsWallet(
   }
   nativeArgs[AUTH_ADDRESS_PARAM[functionName]] = wallet.address;
 
-  const client = (await contract.Client.from({
+  // Loaded lazily so the Stellar SDK (XDR codegen, crypto) stays out of the
+  // first-load bundle for pages that never trade (e.g. `/welcome`, `/embed/*`).
+  const { contract } = await import('@stellar/stellar-sdk');
+
+  const spec = await getContractSpec(contractId, config.stellarRpcUrl, config.stellarNetworkPassphrase);
+
+  const client = new contract.Client(spec, {
     contractId,
     rpcUrl: config.stellarRpcUrl,
     networkPassphrase: config.stellarNetworkPassphrase,
@@ -191,9 +226,9 @@ export async function callAsWallet(
         SIGN_TIMEOUT_MS,
         'Freighter didn’t respond to the signing request — check the extension popup, or try again.',
       ),
-  })) as unknown as contract.Client & TradeContract;
+  }) as unknown as contract.Client & TradeContract;
 
   const tx = await client[functionName](nativeArgs);
   const sent = await tx.signAndSend();
-  return { txHash: sent.sendTransactionResponse?.hash ?? sent.getTransactionResponse?.txHash ?? '' };
+  return { txHash: sent.sendTransactionResponse?.hash ?? '' };
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useWallet } from '@/lib/wallet-provider';
 import { Button } from '@/components/ui/button';
@@ -34,6 +34,27 @@ export function AuthControls({ compact = false }: { compact?: boolean }) {
   const [showEmail, setShowEmail] = useState(false);
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
+
+  // Focus is only moved when the email form appears as a result of a user
+  // click ("or use email"), never when it renders by default (e.g. no
+  // Freighter available). Auto-focusing on load would steal focus and can
+  // scroll the host page when this renders inside the `/embed/[id]` iframe
+  // (WCAG 3.2.1). `focusOnMount` is captured at click time so the effect
+  // below only fires for that intentional transition.
+  const emailInputRef = useRef<HTMLInputElement>(null);
+  const codeInputRef = useRef<HTMLInputElement>(null);
+  const [focusOnMount, setFocusOnMount] = useState(false);
+
+  useEffect(() => {
+    if (!focusOnMount) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFocusOnMount(false);
+    if (emailStep === 'code-sent') {
+      codeInputRef.current?.focus();
+    } else {
+      emailInputRef.current?.focus();
+    }
+  }, [focusOnMount, emailStep]);
 
   // Landing-page CTAs (`?new=1`, see hero.tsx/final-cta.tsx) land here
   // rather than silently opening Freighter's connect prompt on page load —
@@ -107,8 +128,8 @@ export function AuthControls({ compact = false }: { compact?: boolean }) {
           }}
         >
           <div className="flex items-center gap-2">
-            <Input
-              autoFocus
+            <input
+              ref={codeInputRef}
               disabled={emailBusy}
               size="sm"
               className="w-24 disabled:opacity-60"
@@ -147,8 +168,8 @@ export function AuthControls({ compact = false }: { compact?: boolean }) {
         }}
       >
         <div className="flex items-center gap-2">
-          <Input
-            autoFocus
+          <input
+            ref={emailInputRef}
             type="email"
             disabled={emailBusy}
             size="sm"
@@ -200,7 +221,14 @@ export function AuthControls({ compact = false }: { compact?: boolean }) {
           Connects Freighter — sign every trade yourself, no custodial account.
         </p>
       )}
-      <button type="button" onClick={() => setShowEmail(true)} className={linkClass}>
+      <button
+        type="button"
+        onClick={() => {
+          setFocusOnMount(true);
+          setShowEmail(true);
+        }}
+        className={linkClass}
+      >
         or use email
       </button>
     </div>

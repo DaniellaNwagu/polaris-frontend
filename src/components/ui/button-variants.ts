@@ -14,10 +14,11 @@ export const buttonVariants = cva(
           "bg-[var(--destructive)] text-[var(--destructive-foreground)] hover:opacity-90",
       },
       size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-9 px-3",
-        lg: "h-11 px-8",
-        icon: "h-10 w-10",
+        sm: 'h-8 px-3 text-sm',
+        md: 'h-10 px-4 text-sm',
+        lg: 'h-12 px-6 text-base',
+        // 44px touch target for mobile embeds (WCAG 2.5.8 / platform guidance).
+        touch: 'h-11 px-4 text-sm',
       },
     },
     defaultVariants: {

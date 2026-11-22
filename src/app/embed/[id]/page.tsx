@@ -183,7 +183,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
               <p className="text-xs text-[var(--muted)]">Trading closed.</p>
             )
           ) : showEmailFallback ? (
-            <AuthControls compact />
+            <AuthControls compact autoFocus={false} />
           ) : (
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
@@ -191,15 +191,21 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
                   size="sm"
                   variant={side === 'Yes' ? 'yes' : 'outline'}
                   onClick={() => setSide('Yes')}
+                  className="h-11 min-h-11"
                 >
                   YES
                 </Button>
-                <Button size="sm" variant={side === 'No' ? 'no' : 'outline'} onClick={() => setSide('No')}>
+                <Button
+                  size="sm"
+                  variant={side === 'No' ? 'no' : 'outline'}
+                  onClick={() => setSide('No')}
+                  className="h-11 min-h-11"
+                >
                   NO
                 </Button>
               </div>
               <input
-                className="h-8 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2 text-xs"
+                className="h-11 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2 text-xs"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 inputMode="decimal"
@@ -207,6 +213,6 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
               />
               {payoutPreview && (
                 <p className="text-[10px] text-[var(--faint)]">
-                  You get <span className="font-semibold text
+                  You get <span className="
 
-/* … truncated 1733 chars — edit only what you need near the top … */
+/* … truncated 90 chars — edit only what you need near the top … */
