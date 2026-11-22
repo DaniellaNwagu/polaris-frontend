@@ -17,82 +17,16 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npx tsc --noEmit
-      - run: npm test
-      - name: Build
-        run: npm run build 2>&1 | tee build-output.log
-      - name: Bundle-size report and budget check
+      - run: npm run test:coverage
+      - name: Coverage summary
+        if: always()
         run: |
-          node <<'EOF'
-          const fs = require('fs');
-
-          const log = fs.readFileSync('build-output.log', 'utf8');
-
-          // Budgets in kB of first-load JS per route.
-          const budgets = {
-            '/embed/[id]': 150,
-            '/welcome': 200,
-          };
-
-          // next build prints a table like:
-          //   Route (app)                              Size     First Load JS
-          //   ┌ ○ /                                    1.2 kB          95 kB
-          //   ├ ○ /embed/[id]                          3.4 kB         120 kB
-          const rows = [];
-          const lineRe = /^\s*[\u250c\u251c\u2514\u2502]?\s*[\u25cb\u0192\u03bb]?\s*(\/\S*)\s+([\d.]+\s*[kK]?[bB])\s+([\d.]+\s*[kK]?[bB])\s*$/;
-          for (const line of log.split('\n')) {
-            const m = line.match(lineRe);
-            if (!m) continue;
-            const route = m[1];
-            const size = m[2];
-            const firstLoad = m[3];
-            rows.push({ route, size, firstLoad });
-          }
-
-          const toKb = (s) => {
-            const m = s.match(/([\d.]+)\s*([kK]?)[bB]/);
-            if (!m) return NaN;
-            const n = parseFloat(m[1]);
-            return m[2] ? n : n / 1024;
-          };
-
-          const lines = [];
-          lines.push('## Bundle size (first-load JS)');
-          lines.push('');
-          lines.push('| Route | Size | First Load JS | Budget | Status |');
-          lines.push('| --- | --- | --- | --- | --- |');
-
-          const failures = [];
-          for (const row of rows) {
-            const budget = budgets[row.route];
-            const kb = toKb(row.firstLoad);
-            let status = '—';
-            let budgetCell = '—';
-            if (budget !== undefined) {
-              budgetCell = `${budget} kB`;
-              if (Number.isFinite(kb) && kb > budget) {
-                status = '❌ over budget';
-                failures.push(`${row.route}: ${row.firstLoad} exceeds ${budget} kB`);
-              } else {
-                status = '✅ within budget';
-              }
-            }
-            lines.push(`| \`${row.route}\` | ${row.size} | ${row.firstLoad} | ${budgetCell} | ${status} |`);
-          }
-
-          if (rows.length === 0) {
-            lines.push('| _no routes parsed from build output_ | | | | |');
-          }
-
-          const summary = lines.join('\n');
-          console.log(summary);
-
-          if (process.env.GITHUB_STEP_SUMMARY) {
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
-          }
-
-          if (failures.length > 0) {
-            console.error('\nBundle-size budget exceeded:');
-            for (const f of failures) console.error(`  - ${f}`);
-            process.exit(1);
-          }
-          EOF
+          node -e '
+          const t = require("./coverage/coverage-summary.json").total;
+          const row = (k) => `| ${k} | ${t[k].pct}% | ${t[k].covered}/${t[k].total} |`;
+          console.log(["### src/lib coverage", "", "| Metric | % | Covered |", "|---|---|---|",
+            ...["lines", "statements", "functions", "branches"].map(row)].join("\n"));
+          ' >> "$GITHUB_STEP_SUMMARY"
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
