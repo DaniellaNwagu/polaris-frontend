@@ -39,20 +39,19 @@ function ChgCell({ yesBpsChange }: { yesBpsChange: number | null | undefined }) 
  * tiles. "Chg" is the YES odds' real move against `polaris-oracle`'s
  * recorded history (default a 1h lookback) — see `ChgCell`'s doc comment
  * for the null-vs-zero distinction.
+ *
+ * The market itself comes from the list response (`AllMarketsPage` already
+ * has it) rather than a per-row `api.getMarket` fetch — only the price is
+ * queried per row, and only for open markets.
  */
-function MarketRow({ contractId }: { contractId: string }) {
-  const { data: market } = useQuery({
-    queryKey: ['market', contractId],
-    queryFn: () => api.getMarket(contractId),
-  });
+function MarketRow({ market }: { market: WatchedMarket }) {
+  const contractId = market.contractId;
   const { data: price } = useQuery({
     queryKey: ['price', contractId],
     queryFn: () => api.getPrice(contractId),
-    enabled: market?.status === 'watching',
+    enabled: market.status === 'watching',
     refetchInterval: 15_000,
   });
-
-  if (!market) return null;
 
   const yesPct = price ? Math.round(price.yesBps / 100) : undefined;
   const noPct = price ? Math.round(price.noBps / 100) : undefined;
@@ -148,7 +147,7 @@ export default function AllMarketsPage() {
           </div>
           <div className="divide-y divide-[var(--line)]">
             {markets.map((m) => (
-              <MarketRow key={m.contractId} contractId={m.contractId} />
+              <MarketRow key={m.contractId} market={m} />
             ))}
           </div>
         </Card>

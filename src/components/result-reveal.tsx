@@ -19,6 +19,12 @@ import { stroopsToXlm } from '@/lib/format';
  * once" bookkeeping is needed. `prefers-reduced-motion` is handled in
  * `globals.css`, not here, so it degrades correctly regardless of when/how
  * this mounts.
+ *
+ * The outcome is announced to screen readers via a `role="status"` /
+ * `aria-live="polite"` region. That region is rendered even while the market
+ * is still `Open` (visually empty), so it exists in the accessibility tree
+ * *before* resolution — a live region only announces changes to content that
+ * was already present, so mounting it at resolution time would stay silent.
  */
 export function ResultReveal({
   status,
@@ -32,7 +38,7 @@ export function ResultReveal({
   nextRoundHref?: string;
   compact?: boolean;
 }) {
-  if (status === 'Open') return null;
+  const resolved = status !== 'Open';
 
   const tone = status === 'Cancelled' ? 'neutral' : didWin(status, position) ? 'won' : 'lost';
   const payout = redeemableValue(status, position);
@@ -47,17 +53,21 @@ export function ResultReveal({
         : null;
 
   return (
-    <div
-      className={['result-reveal', `result-reveal--${tone}`, 'result-reveal--in', compact ? 'result-reveal--compact' : '']
-        .filter(Boolean)
-        .join(' ')}
-    >
-      <p className="result-reveal__headline">{headline}</p>
-      {detail && <p className="result-reveal__detail">{detail}</p>}
-      {nextRoundHref && (
-        <Link href={nextRoundHref} className="result-reveal__next">
-          Next round is live →
-        </Link>
+    <div role="status" aria-live="polite" aria-atomic="true">
+      {resolved && (
+        <div
+          className={['result-reveal', `result-reveal--${tone}`, 'result-reveal--in', compact ? 'result-reveal--compact' : '']
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <p className="result-reveal__headline">{headline}</p>
+          {detail && <p className="result-reveal__detail">{detail}</p>}
+          {nextRoundHref && (
+            <Link href={nextRoundHref} className="result-reveal__next">
+              Next round is live →
+            </Link>
+          )}
+        </div>
       )}
     </div>
   );

@@ -3,14 +3,22 @@ import { config } from './config';
 /** A hung oracle (not erroring, just never responding) would otherwise leave every caller's busy state stuck forever with no recourse — same failure shape `freighter-wallet.ts`'s `withTimeout` guards against for signing. */
 const REQUEST_TIMEOUT_MS = 20_000;
 
+/**
+ * Server components (see `markets/page.tsx` / `perpetuals/page.tsx`) fetch the
+ * list on the server so the first HTML response already contains rows. The
+ * oracle is reached directly from the Next.js server, so the browser-only
+ * `credentials: 'include'` cookie forwarding is skipped there — there is no
+ * session cookie to send for these public list endpoints anyway.
+ */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const isServer = typeof window === 'undefined';
   const res = await fetch(`${config.oracleUrl}${path}`, {
     ...init,
     // Needed for the email-login session cookie (httpOnly, set by the
     // backend) to be sent on same-site-but-cross-origin requests like
     // localhost:3000 -> localhost:3001. Harmless for every other endpoint,
     // which simply has no cookie to send.
-    credentials: 'include',
+    ...(isServer ? {} : { credentials: 'include' as RequestCredentials }),
     headers: { 'content-type': 'application/json', ...init?.headers },
     signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -186,13 +194,6 @@ export const api = {
   getPrice: (id: string) =>
     request<{ yesBps: number; noBps: number; yesBpsChange: number | null }>(`/markets/${id}/price`),
   getFee: (id: string) => request<{ feeBps: number }>(`/markets/${id}/fee`),
-  getTickerPrice: (feedId: string) => request<unknown>(`/prices/${feedId}`),
-
-  faucet: (address: string) =>
-    request<{ funded: boolean; alreadyExists: boolean }>('/markets/faucet', {
-      method: 'POST',
-      body: JSON.stringify({ address }),
-    }),
 
   /** Spendable native-XLM collateral balance, in stroops — same shape for a Freighter or email-custodial wallet. */
   getBalance: (address: string) =>
@@ -211,52 +212,4 @@ export const api = {
     args: Record<string, string | number>;
     contractKind?: 'market' | 'perpetual';
   }) => request<{ txHash: string }>('/auth/email/trade', { method: 'POST', body: JSON.stringify(params) }),
-
-  // perpetuals — see `polaris-oracle/README.md`'s "Perpetual markets" for
-  // why this is a parallel set of endpoints/types, not a `market`-shaped
-  // union: no strike/expiry/settle exist on this contract at all.
-  listPerpetuals: () => request<WatchedPerpetual[]>('/perpetuals'),
-  getPerpetual: (id: string) => request<WatchedPerpetual>(`/perpetuals/${id}`),
-  getPerpetualState: (id: string) => request<OnChainPerpetual>(`/perpetuals/${id}/state`),
-  getPerpetualPosition: (id: string, address: string) =>
-    request<{ yes: string; no: string }>(`/perpetuals/${id}/position?address=${encodeURIComponent(address)}`),
-  getPerpetualPrice: (id: string) => request<{ yesBps: number; noBps: number }>(`/perpetuals/${id}/price`),
-  getPerpetualFee: (id: string) => request<{ feeBps: number }>(`/perpetuals/${id}/fee`),
-
-  // admin
-  createPerpetual: (adminKey: string, body: Record<string, unknown>) =>
-    request<WatchedPerpetual & { initTxHash: string }>('/perpetuals/create', {
-      method: 'POST',
-      headers: { 'x-admin-key': adminKey },
-      body: JSON.stringify(body),
-    }),
-  triggerTerminate: (adminKey: string, id: string) =>
-    request<WatchedPerpetual>(`/perpetuals/${id}/terminate`, { method: 'POST', headers: { 'x-admin-key': adminKey } }),
-  /** Admin-triggered, not scheduled — see `polaris-oracle/README.md`'s "Perpetual markets". Only meaningful for a perpetual whose `price_oracle` bundle is actually configured (`MOCK_REDSTONE_CONTRACT` set on the backend); otherwise the backend itself returns a clear error. */
-  triggerCheckpoint: (adminKey: string, id: string) =>
-    request<OnChainPerpetual & { txHash: string }>(`/perpetuals/${id}/checkpoint`, {
-      method: 'POST',
-      headers: { 'x-admin-key': adminKey },
-    }),
-
-  // admin
-  createMarket: (adminKey: string, body: Record<string, unknown>) =>
-    request<WatchedMarket & { initTxHash: string }>('/markets/create', {
-      method: 'POST',
-      headers: { 'x-admin-key': adminKey },
-      body: JSON.stringify(body),
-    }),
-  triggerSettle: (adminKey: string, id: string) =>
-    request<WatchedMarket>(`/markets/${id}/settle`, { method: 'POST', headers: { 'x-admin-key': adminKey } }),
-  triggerCancel: (adminKey: string, id: string) =>
-    request<WatchedMarket>(`/markets/${id}/cancel`, { method: 'POST', headers: { 'x-admin-key': adminKey } }),
-
-  // admin dashboard — every call here is what AdminKeyProvider's gate probes with
-  getAdminOverview: (adminKey: string) => adminGet<AdminOverview>('/admin/overview', adminKey),
-  getAdminFeeRevenue: (adminKey: string) => adminGet<AdminFeeRevenue>('/admin/fee-revenue', adminKey),
-  getAdminTreasury: (adminKey: string) => adminGet<AdminTreasury>('/admin/treasury', adminKey),
-  getAdminWallets: (adminKey: string) => adminGet<AdminWallets>('/admin/wallets', adminKey),
-  getAdminNetwork: (adminKey: string) => adminGet<AdminNetwork>('/admin/network', adminKey),
-  getAdminSettlementChecks: (adminKey: string) =>
-    adminGet<{ checks: SettlementCheck[] }>('/admin/settlement-checks', adminKey),
 };

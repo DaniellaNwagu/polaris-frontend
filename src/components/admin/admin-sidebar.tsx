@@ -24,6 +24,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Finance',
     items: [
       { href: '/admin/markets', label: 'Markets' },
+      { href: '/admin/create', label: 'Create Market' },
       { href: '/admin/perpetuals', label: 'Perpetuals' },
       { href: '/admin/fee-revenue', label: 'Fee Revenue' },
       { href: '/admin/treasury', label: 'Treasury' },
@@ -39,12 +40,18 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+const FOCUS_RING =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2';
+
 export function AdminSidebar() {
   const pathname = usePathname();
 
   return (
     <nav className="w-56 shrink-0 space-y-6 border-r border-[var(--line)] px-4 py-6">
-      <Link href="/" className="flex items-center gap-2 px-2 font-bold">
+      <Link
+        href="/"
+        className={cn('flex items-center gap-2 rounded-lg px-2 font-bold', FOCUS_RING)}
+      >
         <span
           className="flex h-7 w-7 items-center justify-center rounded-lg text-white text-sm"
           style={{ background: 'linear-gradient(135deg, #5b4fe0, #8b7bff)' }}
@@ -67,6 +74,7 @@ export function AdminSidebar() {
                   href={item.href}
                   className={cn(
                     'block rounded-lg px-2 py-1.5 text-sm',
+                    FOCUS_RING,
                     active
                       ? 'bg-[var(--accent-soft)] font-semibold text-[var(--accent-ink)]'
                       : 'text-[var(--ink-soft)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]',

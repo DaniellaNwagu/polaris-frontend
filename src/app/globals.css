@@ -65,6 +65,15 @@ a {
   color: inherit;
 }
 
+/* Shared keyboard focus indicator for links (WCAG 2.4.7). */
+a:focus-visible {
+  outline: none;
+  border-radius: 4px;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--accent);
+}
+
 /* The one deliberate "moment" — see components/result-reveal.tsx. */
 @keyframes result-reveal-in {
   from {
