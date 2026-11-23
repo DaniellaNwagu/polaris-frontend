@@ -17,6 +17,12 @@ interface AdminKeyContextValue {
    * the last probe's result for the *current* key value.
    */
   status: AdminKeyStatus;
+  /**
+   * Clears the stored key and returns to the gate. Removes the
+   * `sessionStorage` entry so a reload after locking does not restore
+   * access, and resets in-memory state to `'unset'`.
+   */
+  lock: () => void;
 }
 
 const AdminKeyContext = createContext<AdminKeyContextValue | null>(null);
@@ -88,7 +94,15 @@ export function AdminKeyProvider({ children }: { children: React.ReactNode }) {
     window.sessionStorage.setItem(STORAGE_KEY, key);
   }, []);
 
-  return <AdminKeyContext.Provider value={{ adminKey, setAdminKey, status }}>{children}</AdminKeyContext.Provider>;
+  const lock = useCallback(() => {
+    window.sessionStorage.removeItem(STORAGE_KEY);
+    setAdminKeyState('');
+    setStatus('unset');
+  }, []);
+
+  return (
+    <AdminKeyContext.Provider value={{ adminKey, setAdminKey, status, lock }}>{children}</AdminKeyContext.Provider>
+  );
 }
 
 export function useAdminKey(): AdminKeyContextValue {
