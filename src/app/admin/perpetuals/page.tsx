@@ -7,7 +7,8 @@ import { useAdminKey } from '@/lib/admin-key-provider';
 import { Card, CardBody } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { shortAddress, statusLabel, centsToUsd } from '@/lib/format';
+import { Address } from '@/components/address';
+import { statusLabel, centsToUsd } from '@/lib/format';
 
 /**
  * `polaris-perpetual`'s admin table — a separate page from `/admin/markets`
@@ -66,7 +67,7 @@ export default function AdminPerpetualsPage() {
           <Card key={p.contractId}>
             <CardBody className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="font-mono text-xs text-[var(--faint)]">{shortAddress(p.contractId)}</div>
+                <Address value={p.contractId} />
                 <div className="text-sm font-semibold">XLM/USD perpetual</div>
                 {p.lastError && <div className="mt-1 text-xs text-[var(--no)] max-w-md break-all">{p.lastError}</div>}
                 {lastCheckpoint[p.contractId] && (
