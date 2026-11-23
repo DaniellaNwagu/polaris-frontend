@@ -50,7 +50,9 @@ export function TradeCard({
    * redeem succeeds but the buy then fails (slippage, pool depth, this
    * market already closed), the user simply holds the redeemed collateral
    * in their own wallet — not a fund-safety issue, the same recoverable
-   * failure shape `txError` already surfaces for any other failed buy.
+   * failure shape `txError` already surfaces for any other failed buy. The
+   * error message explicitly states the redeemed amount so the user doesn't
+   * think nothing happened and try to redeem again.
    */
   rolloverFromMarketId?: string;
 }) {
@@ -156,9 +158,14 @@ export function TradeCard({
     }
 
     setBusy(true);
+    // Tracks whether the rollover redeem already landed, so a subsequent buy
+    // failure can tell the user their winnings are safely in their wallet
+    // instead of leaving them to think nothing happened.
+    let redeemedAmount: bigint | null = null;
     try {
       if (rolloverFromMarketId && rolloverAmount > 0n) {
         await callAsWallet(activeWallet, rolloverFromMarketId, 'redeem', {});
+        redeemedAmount = rolloverAmount;
         await queryClient.invalidateQueries({ queryKey: ['position', rolloverFromMarketId, activeWallet.address] });
       }
 
@@ -176,108 +183,15 @@ export function TradeCard({
         queryClient.invalidateQueries({ queryKey: ['price', marketId] }),
       ]);
     } catch (err) {
-      setTxError(messageFromApiError(err));
+      const message = messageFromApiError(err);
+      setTxError(
+        redeemedAmount !== null
+          ? `Your ${stroopsToXlm(redeemedAmount.toString())} XLM winnings were redeemed to your wallet, but the new bet failed: ${message}`
+          : message,
+      );
     } finally {
       setBusy(false);
     }
-  }
 
-  async function handleRedeem() {
-    if (!wallet) {
-      await connectWallet();
-      return;
-    }
-    setBusy(true);
-    setTxError(null);
-    setTxResult(null);
-    try {
-      const { txHash } = await callAsWallet(wallet, marketId, 'redeem', {});
-      setTxResult(txHash);
-      await queryClient.invalidateQueries({ queryKey: ['position', marketId, wallet.address] });
-    } catch (err) {
-      setTxError(messageFromApiError(err));
-    } finally {
-      setBusy(false);
-    }
-  }
 
-  return (
-    <Card className={className}>
-      <CardBody className={bodyClassName}>
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">{market.question}</h2>
-          <span className="text-xs uppercase tracking-wide text-[var(--muted)]">{market.status}</span>
-        </div>
-
-        {isOpen && (
-          <div className="mt-4 space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant={side === 'Yes' ? 'primary' : 'secondary'}
-                onClick={() => setSide('Yes')}
-                disabled={busy}
-              >
-                Yes
-              </Button>
-              <Button
-                variant={side === 'No' ? 'primary' : 'secondary'}
-                onClick={() => setSide('No')}
-                disabled={busy}
-              >
-                No
-              </Button>
-            </div>
-
-            <label className="block text-sm">
-              <span className="text-[var(--muted)]">Amount (XLM)</span>
-              <Input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.1"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                disabled={busy}
-                className="mt-1"
-              />
-            </label>
-
-            {payoutPreview && (
-              <p className="text-sm text-[var(--muted)]">
-                Potential payout: <span className="font-medium text-[var(--foreground)]">{payoutPreview} XLM</span>
-              </p>
-            )}
-
-            <Button className="w-full" onClick={handleTrade} disabled={busy || connecting}>
-              {busy ? 'Submitting…' : wallet ? `Buy ${side}` : 'Connect & Buy'}
-            </Button>
-            {walletError && <p className="text-sm text-red-500">{walletError}</p>}
-            {txError && <p className="text-sm text-red-500">{txError}</p>}
-          </div>
-        )}
-
-        {!isOpen && (
-          <div className="mt-4 space-y-3">
-            <ResultReveal market={market} position={position} />
-            {position && (BigInt(position.yes) > 0n || BigInt(position.no) > 0n) && (
-              <Button className="w-full" onClick={handleRedeem} disabled={busy || connecting}>
-                {busy ? 'Redeeming…' : wallet ? 'Redeem' : 'Connect & Redeem'}
-              </Button>
-            )}
-            {nextRound && (
-              <p className="text-sm text-[var(--muted)]">
-                Next round is live: <a className="underline" href={`/market/${nextRound.id}`}>{nextRound.question}</a>
-              </p>
-            )}
-          </div>
-        )}
-
-        {txResult && (
-          <p className="mt-3 text-sm text-[var(--muted)]">
-            Submitted: <span className="font-mono">{shortAddress(txResult)}</span>
-          </p>
-        )}
-      </CardBody>
-    </Card>
-  );
-}
+/* … truncated 3426 chars — edit only what you need near the top … */
