@@ -148,6 +148,18 @@ export function PerpetualTradeCard({
     }
   }
 
+  function handleSideChange(next: 'Yes' | 'No') {
+    setSide(next);
+    setTxResult(null);
+    setTxError(null);
+  }
+
+  function handleAmountChange(next: string) {
+    setAmount(next);
+    setTxResult(null);
+    setTxError(null);
+  }
+
   const pos = position ? { yes: BigInt(position.yes), no: BigInt(position.no) } : null;
   // `Terminated`'s payout is the exact same 0.5-collateral-per-complementary-pair
   // formula as a classic market's `Cancelled` — same reused math (see
@@ -178,10 +190,10 @@ export function PerpetualTradeCard({
         ) : (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
-              <Button variant={side === 'Yes' ? 'yes' : 'outline'} onClick={() => setSide('Yes')}>
+              <Button variant={side === 'Yes' ? 'yes' : 'outline'} onClick={() => handleSideChange('Yes')}>
                 YES
               </Button>
-              <Button variant={side === 'No' ? 'no' : 'outline'} onClick={() => setSide('No')}>
+              <Button variant={side === 'No' ? 'no' : 'outline'} onClick={() => handleSideChange('No')}>
                 NO
               </Button>
             </div>
@@ -190,7 +202,7 @@ export function PerpetualTradeCard({
               <input
                 className="mt-1 h-10 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => handleAmountChange(e.target.value)}
                 inputMode="decimal"
               />
             </label>
@@ -200,33 +212,5 @@ export function PerpetualTradeCard({
                 <>
                   You get <span className="font-semibold">{payoutPreview} XLM</span> of {side.toUpperCase()}{' '}
                   <span className="text-[var(--faint)]">(you stake {amount || '0'} XLM)</span>
-                </>
-              ) : (
-                <span className="text-[var(--faint)]">Enter an amount to preview your payout.</span>
-              )}
-            </div>
 
-            <Button className="w-full" onClick={handleTrade} disabled={busy}>
-              {busy ? 'Confirming…' : `Buy ${side.toUpperCase()}`}
-            </Button>
-          </div>
-        )}
-
-        {txResult && (
-          <p className="mt-3 text-xs text-[var(--muted)]">
-            Confirmed — ref{' '}
-            <a
-              href={explorerTxUrl(txResult)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:text-[var(--fg)]"
-            >
-              {shortAddress(txResult)}
-            </a>
-          </p>
-        )}
-        {txError && <p className="mt-3 text-xs text-[var(--danger)]">{txError}</p>}
-      </CardBody>
-    </Card>
-  );
-}
+/* … truncated 896 chars — edit only what you need near the top … */

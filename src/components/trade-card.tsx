@@ -63,6 +63,14 @@ export function TradeCard({
   const [txResult, setTxResult] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
 
+  // Clear the previous outcome message whenever the user changes the side or
+  // amount — otherwise a "Confirmed"/error from a trade they no longer have
+  // on screen keeps sitting under a form describing a different trade.
+  useEffect(() => {
+    setTxResult(null);
+    setTxError(null);
+  }, [side, amount]);
+
   const { data: market } = useQuery({
     queryKey: ['market', marketId],
     queryFn: () => api.getMarket(marketId),
@@ -186,9 +194,17 @@ export function TradeCard({
     <Card className={className}>
       <CardBody className={bodyClassName}>
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Trade</h2>
-          <span className="text-xs text-[var(--muted)]">{market.status}</span>
+          <h2 className="text-base font-semibold">Trade</h2>
+          {wallet ? (
+            <span className="text-xs text-[var(--muted)]">{shortAddress(wallet.address)}</span>
+          ) : (
+            <Button variant="secondary" onClick={() => void connectWallet()} disabled={connecting}>
+              {connecting ? 'Connecting…' : 'Connect wallet'}
+            </Button>
+          )}
         </div>
+
+        {walletError && <p className="mt-2 text-xs text-red-500">{walletError}</p>}
 
         <div className="mt-4 grid grid-cols-2 gap-2">
           <Button
@@ -196,18 +212,18 @@ export function TradeCard({
             onClick={() => setSide('Yes')}
             disabled={!isOpen || busy}
           >
-            Yes
+            Buy YES
           </Button>
           <Button
             variant={side === 'No' ? 'primary' : 'secondary'}
             onClick={() => setSide('No')}
             disabled={!isOpen || busy}
           >
-            No
+            Buy NO
           </Button>
         </div>
 
-        <label className="mt-4 block text-sm text-[var(--muted)]" htmlFor="trade-amount">
+        <label className="mt-4 block text-xs text-[var(--muted)]" htmlFor="trade-amount">
           Amount (XLM)
         </label>
         <Input
@@ -220,36 +236,19 @@ export function TradeCard({
         />
 
         {payoutPreview && (
-          <p className="mt-2 text-sm text-[var(--muted)]">
-            Estimated payout: <span className="text-[var(--foreground)]">{payoutPreview} XLM</span>
+          <p className="mt-2 text-xs text-[var(--muted)]">
+            Estimated payout: <span className="font-medium text-[var(--foreground)]">{payoutPreview} XLM</span>
           </p>
         )}
 
-        <Button className="mt-4 w-full" onClick={handleTrade} disabled={!isOpen || busy || connecting}>
-          {busy ? 'Confirming…' : connecting ? 'Connecting…' : `Buy ${side}`}
+        <Button className="mt-4 w-full" onClick={() => void handleTrade()} disabled={!isOpen || busy}>
+          {busy ? 'Placing…' : `Buy ${side}`}
         </Button>
 
-        {walletError && <p className="mt-2 text-sm text-red-500">{walletError}</p>}
-        {txError && <p className="mt-2 text-sm text-red-500">{txError}</p>}
         {txResult && (
-          <p className="mt-2 text-sm text-green-500">
-            Confirmed — ref{' '}
-            <a
-              href={`https://stellar.expert/explorer/${networkName}/tx/${txResult}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline"
-            >
-              {shortAddress(txResult)}
-            </a>
-          </p>
+          <p className="mt-3 text-xs text-green-500">Confirmed — ref {shortAddress(txResult)}</p>
         )}
-
-        {position && (
-          <p className="mt-4 text-xs text-[var(--muted)]">
-            Your position — Yes: {stroopsToXlm(position.yes)} · No: {stroopsToXlm(position.no)}
-          </p>
-        )}
+        {txError && <p className="mt-3 text-xs text-red-500">{txError}</p>}
 
         <ResultReveal market={market} position={position} nextRound={nextRound} />
       </CardBody>
