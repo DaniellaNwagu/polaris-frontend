@@ -121,6 +121,19 @@ export interface OnChainPerpetual {
   lastPriceAt: string;
 }
 
+/**
+ * Live ticker price for one feed, in cents — the number every market's
+ * strike is compared against. `priceCents` is a decimal string (same
+ * convention as `strikePriceCents`/`lastPriceCents`) so it survives the
+ * JSON round-trip without float drift.
+ */
+export interface TickerPrice {
+  feedId: number;
+  priceCents: string;
+  /** Unix seconds the price was observed, when the oracle reports it. */
+  timestamp?: number;
+}
+
 export interface AdminOverview {
   totalMarkets: number;
   marketsByStatus: Record<string, number>;
@@ -194,6 +207,8 @@ export const api = {
   getPrice: (id: string) =>
     request<{ yesBps: number; noBps: number; yesBpsChange: number | null }>(`/markets/${id}/price`),
   getFee: (id: string) => request<{ feeBps: number }>(`/markets/${id}/fee`),
+  /** Live XLM price for one feed — see `TickerPrice`. */
+  getTickerPrice: (feedId: number) => request<TickerPrice>(`/prices/${feedId}`),
 
   /** Spendable native-XLM collateral balance, in stroops — same shape for a Freighter or email-custodial wallet. */
   getBalance: (address: string) =>
@@ -206,10 +221,6 @@ export const api = {
     request<{ address: string }>('/auth/email/verify', { method: 'POST', body: JSON.stringify({ email, code }) }),
   getEmailSession: () => request<{ email: string; address: string }>('/auth/email/me'),
   emailLogout: () => request<{ ok: boolean }>('/auth/email/logout', { method: 'POST' }),
-  emailTrade: (params: {
-    contractId: string;
-    function: string;
-    args: Record<string, string | number>;
-    contractKind?: 'market' | 'perpetual';
-  }) => request<{ txHash: string }>('/auth/email/trade', { method: 'POST', body: JSON.stringify(params) }),
-};
+  emailTrade: (
+
+/* … truncated 253 chars — edit only what you need near the top … */
