@@ -16,23 +16,27 @@ export default function PerpetualDetailPage({ params }: { params: Promise<{ id: 
   const { data: perpetual } = useQuery({
     queryKey: ['perpetual', id],
     queryFn: () => api.getPerpetual(id),
+    refetchOnWindowFocus: true,
   });
   const { data: price } = useQuery({
     queryKey: ['perpetualPrice', id],
     queryFn: () => api.getPerpetualPrice(id),
     refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
     enabled: perpetual?.status === 'watching',
   });
   const { data: state } = useQuery({
     queryKey: ['perpetualState', id],
     queryFn: () => api.getPerpetualState(id),
     refetchInterval: perpetual?.status === 'watching' ? 15_000 : false,
+    refetchOnWindowFocus: true,
   });
   const { data: fee } = useQuery({
     queryKey: ['perpetualFee', id],
     queryFn: () => api.getPerpetualFee(id),
     enabled: perpetual?.status === 'watching',
     refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   });
 
   // Measure the fixed bottom trade sheet so page padding tracks its real height

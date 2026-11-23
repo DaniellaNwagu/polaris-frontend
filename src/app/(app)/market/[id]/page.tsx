@@ -42,23 +42,27 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
     queryKey: ['market', id],
     queryFn: () => api.getMarket(id),
     refetchInterval: (query) => (isPollableStatus(query.state.data?.status) ? RESOLUTION_POLL_MS : false),
+    refetchOnWindowFocus: true,
   });
   const { data: price } = useQuery({
     queryKey: ['price', id],
     queryFn: () => api.getPrice(id),
     refetchInterval: 15_000,
     enabled: market?.status === 'watching',
+    refetchOnWindowFocus: true,
   });
   const { data: state } = useQuery({
     queryKey: ['state', id],
     queryFn: () => api.getMarketState(id),
     refetchInterval: isPollableStatus(market?.status) ? RESOLUTION_POLL_MS : false,
+    refetchOnWindowFocus: true,
   });
   const { data: fee } = useQuery({
     queryKey: ['fee', id],
     queryFn: () => api.getFee(id),
     enabled: market?.status === 'watching',
     refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   });
 
   if (!market) {
