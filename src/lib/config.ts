@@ -10,3 +10,20 @@ export const config = {
   stellarRpcUrl: process.env.NEXT_PUBLIC_STELLAR_RPC_URL ?? 'https://soroban-testnet.stellar.org',
   stellarNetworkPassphrase: process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015',
 };
+
+// Shared passphrase→network-name mapping. Used both by the wrong-network
+// message and by block-explorer link derivation so the two never drift.
+const NETWORK_NAMES: Record<string, string> = {
+  'Public Global Stellar Network ; September 2015': 'public',
+  'Test SDF Network ; September 2015': 'testnet',
+  'Test SDF Future Network ; October 2022': 'futurenet',
+};
+
+export function networkNameFromPassphrase(passphrase: string): string {
+  return NETWORK_NAMES[passphrase] ?? 'testnet';
+}
+
+export function explorerTxUrl(hash: string): string {
+  const network = networkNameFromPassphrase(config.stellarNetworkPassphrase);
+  return `https://stellar.expert/explorer/${network}/tx/${hash}`;
+}

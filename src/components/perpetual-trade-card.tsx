@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { stroopsToXlm, xlmToStroops, shortAddress } from '@/lib/format';
 import { redeemableValue } from '@/lib/portfolio';
 import { estimateBuyOut, withSlippageTolerance } from '@/lib/amm';
+import { explorerTxUrl } from '@/lib/explorer';
 
 /** Same floor as `TradeCard` — see its doc comment. */
 const SLIPPAGE_TOLERANCE_BPS = 200;
@@ -201,45 +202,30 @@ export function PerpetualTradeCard({
                   <span className="text-[var(--faint)]">(you stake {amount || '0'} XLM)</span>
                 </>
               ) : (
-                <span className="text-[var(--faint)]">Enter an amount to see your position size</span>
+                <span className="text-[var(--faint)]">Enter an amount to preview your payout.</span>
               )}
             </div>
 
-            <Button
-              className="w-full"
-              variant={side === 'Yes' ? 'yes' : 'no'}
-              onClick={handleTrade}
-              disabled={busy || connecting || !state || !fee || !payoutPreview}
-            >
-              {connecting
-                ? 'Confirm in Freighter…'
-                : busy
-                  ? wallet?.kind === 'email'
-                    ? 'Placing trade…'
-                    : 'Confirm in Freighter…'
-                  : `Buy ${side}`}
+            <Button className="w-full" onClick={handleTrade} disabled={busy}>
+              {busy ? 'Confirming…' : `Buy ${side.toUpperCase()}`}
             </Button>
-            {!wallet && !connecting && (
-              <p className="text-center text-[11px] text-[var(--faint)]">
-                Connects Freighter &mdash; sign with your own wallet, no custodial account
-              </p>
-            )}
           </div>
         )}
 
-        {pos && (
-          <div className="mt-4 border-t border-[var(--line)] pt-3 text-xs text-[var(--muted)]">
-            Your position: {stroopsToXlm(pos.yes)} YES / {stroopsToXlm(pos.no)} NO
-          </div>
-        )}
         {txResult && (
-          <p className="mt-3 text-xs text-[var(--yes)]">
-            Confirmed <span className="text-[var(--faint)]">— ref {shortAddress(txResult)}</span>
+          <p className="mt-3 text-xs text-[var(--muted)]">
+            Confirmed — ref{' '}
+            <a
+              href={explorerTxUrl(txResult)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-[var(--fg)]"
+            >
+              {shortAddress(txResult)}
+            </a>
           </p>
         )}
-        {(txError || walletError) && (
-          <p className="mt-3 text-xs text-[var(--no)] break-all">{txError ?? walletError}</p>
-        )}
+        {txError && <p className="mt-3 text-xs text-[var(--danger)]">{txError}</p>}
       </CardBody>
     </Card>
   );
