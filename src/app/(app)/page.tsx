@@ -19,7 +19,7 @@ import { rankMarkets } from '@/lib/rank-markets';
  * here, not deleted.
  */
 export default function HomePage() {
-  const { data: markets, isLoading, error } = useQuery({
+  const { data: markets, isLoading, error, refetch } = useQuery({
     queryKey: ['markets'],
     queryFn: api.listMarkets,
     refetchInterval: 30_000,
@@ -40,7 +40,19 @@ export default function HomePage() {
     return <p className="text-sm text-[var(--muted)]">Loading markets…</p>;
   }
   if (error) {
-    return <p className="text-sm text-[var(--no)]">Couldn&rsquo;t reach the backend: {(error as Error).message}</p>;
+    console.error('Failed to load markets', error);
+    return (
+      <div>
+        <p className="mb-3 text-sm text-[var(--no)]">Markets are temporarily unavailable</p>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="text-sm font-semibold text-[var(--accent-ink)] hover:underline"
+        >
+          Retry
+        </button>
+      </div>
+    );
   }
   if (!featured) {
     return (
