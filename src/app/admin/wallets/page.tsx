@@ -50,30 +50,6 @@ export default function AdminWalletsPage() {
           )}
         </CardBody>
       </Card>
-
-      <Card>
-        <CardBody>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Passkey addresses seen</h2>
-            <Badge tone="accent">{data.passkeyAddressesSeen.length} total</Badge>
-          </div>
-          <p className="mb-3 text-xs text-[var(--faint)]">
-            Not exhaustive — there&apos;s no registry, on-chain or off, of every passkey wallet ever deployed. This
-            is only addresses that have made at least one trade since this dashboard shipped.
-          </p>
-          {data.passkeyAddressesSeen.length === 0 ? (
-            <p className="text-sm text-[var(--faint)]">None seen yet.</p>
-          ) : (
-            <div className="grid grid-cols-1 gap-1 font-mono text-xs sm:grid-cols-2">
-              {data.passkeyAddressesSeen.map((address) => (
-                <div key={address} className="text-[var(--faint)]">
-                  {shortAddress(address)}
-                </div>
-              ))}
-            </div>
-          )}
-        </CardBody>
-      </Card>
     </div>
   );
 }
