@@ -18,6 +18,18 @@ import { useNextRound } from '@/lib/use-next-round';
 const SLIPPAGE_TOLERANCE_BPS = 200;
 
 /**
+ * Emit a lifecycle event to the host page when this widget is embedded in an
+ * iframe. Payloads are intentionally minimal — no wallet address, balance, or
+ * position size — so a host site can measure conversions and react to
+ * resolution without learning anything about the user. See the embed guide
+ * for the documented schema.
+ */
+function emitEmbedEvent(type: string, detail?: Record<string, unknown>) {
+  if (typeof window === 'undefined' || window.parent === window) return;
+  window.parent.postMessage({ type, ...detail }, '*');
+}
+
+/**
  * The buy/redeem card — the one piece of trade UI in this app, used by both
  * the market detail page and the curated homepage's featured market.
  * Deliberately NOT forked between them: this file used to be inlined only
@@ -115,6 +127,34 @@ export function TradeCard({
     }
   }, [rolloverAmount]);
 
+  // Embed lifecycle: tell the host page the widget is ready once it mounts.
+  useEffect(() => {
+    emitEmbedEvent('polaris:ready');
+  }, []);
+
+  // Embed lifecycle: tell the host page a wallet connected. Fires on the
+  // transition into a connected wallet (including the connect-on-commit path
+  // in `handleTrade`), not on every render.
+  const wasConnected = useRef(false);
+  useEffect(() => {
+    if (wallet && !wasConnected.current) {
+      wasConnected.current = true;
+      emitEmbedEvent('polaris:connected');
+    } else if (!wallet) {
+      wasConnected.current = false;
+    }
+  }, [wallet]);
+
+  // Embed lifecycle: tell the host page when the embedded market resolves.
+  const lastStatus = useRef<MarketStatus | null>(null);
+  useEffect(() => {
+    const status = (market?.status ?? null) as MarketStatus | null;
+    if (status && status !== 'Open' && status !== 'watching' && lastStatus.current !== status) {
+      emitEmbedEvent('polaris:resolved', { status });
+    }
+    lastStatus.current = status;
+  }, [market?.status]);
+
   const payoutPreview = useMemo(() => {
     if (!state || !fee) return null;
     try {
@@ -171,6 +211,9 @@ export function TradeCard({
         min_shares_out: minSharesOut.toString(),
       });
       setTxResult(txHash);
+      // Embed lifecycle: a trade confirmed. Payload is only the side and the
+      // tx hash — no address, balance, or position size.
+      emitEmbedEvent('polaris:trade', { side, txHash });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['position', marketId, activeWallet.address] }),
         queryClient.invalidateQueries({ queryKey: ['price', marketId] }),
@@ -182,101 +225,57 @@ export function TradeCard({
     }
   }
 
-  async function handleRedeem() {
-    if (!wallet) {
-      await connectWallet();
-      return;
-    }
-    setBusy(true);
-    setTxError(null);
-    setTxResult(null);
-    try {
-      const { txHash } = await callAsWallet(wallet, marketId, 'redeem', {});
-      setTxResult(txHash);
-      await queryClient.invalidateQueries({ queryKey: ['position', marketId, wallet.address] });
-    } catch (err) {
-      setTxError(messageFromApiError(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <Card className={className}>
       <CardBody className={bodyClassName}>
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">{market.question}</h2>
-          <span className="text-xs uppercase tracking-wide text-[var(--muted)]">{market.status}</span>
+          <h2 className="text-lg font-semibold">Trade</h2>
+          {wallet ? (
+            <span className="text-xs text-[var(--muted)]">{shortAddress(wallet.address)}</span>
+          ) : (
+            <Button variant="secondary" onClick={() => connectWallet()} disabled={connecting}>
+              {connecting ? 'Connecting…' : 'Connect wallet'}
+            </Button>
+          )}
         </div>
 
-        {isOpen && (
-          <div className="mt-4 space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant={side === 'Yes' ? 'primary' : 'secondary'}
-                onClick={() => setSide('Yes')}
-                disabled={busy}
-              >
-                Yes
-              </Button>
-              <Button
-                variant={side === 'No' ? 'primary' : 'secondary'}
-                onClick={() => setSide('No')}
-                disabled={busy}
-              >
-                No
-              </Button>
-            </div>
+        {walletError && <p className="mt-2 text-sm text-red-500">{walletError}</p>}
 
-            <label className="block text-sm">
-              <span className="text-[var(--muted)]">Amount (XLM)</span>
-              <Input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.1"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                disabled={busy}
-                className="mt-1"
-              />
-            </label>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button variant={side === 'Yes' ? 'primary' : 'secondary'} onClick={() => setSide('Yes')}>
+            Yes
+          </Button>
+          <Button variant={side === 'No' ? 'primary' : 'secondary'} onClick={() => setSide('No')}>
+            No
+          </Button>
+        </div>
 
-            {payoutPreview && (
-              <p className="text-sm text-[var(--muted)]">
-                Potential payout: <span className="font-medium text-[var(--foreground)]">{payoutPreview} XLM</span>
-              </p>
-            )}
+        <div className="mt-4">
+          <label className="text-sm text-[var(--muted)]" htmlFor="trade-amount">
+            Amount (XLM)
+          </label>
+          <Input
+            id="trade-amount"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            inputMode="decimal"
+            disabled={!isOpen || busy}
+          />
+          {payoutPreview && (
+            <p className="mt-1 text-xs text-[var(--muted)]">Payout if correct: ~{payoutPreview} XLM</p>
+          )}
+        </div>
 
-            <Button className="w-full" onClick={handleTrade} disabled={busy || connecting}>
-              {busy ? 'Submitting…' : wallet ? `Buy ${side}` : 'Connect & Buy'}
-            </Button>
-            {walletError && <p className="text-sm text-red-500">{walletError}</p>}
-            {txError && <p className="text-sm text-red-500">{txError}</p>}
-          </div>
-        )}
-
-        {!isOpen && (
-          <div className="mt-4 space-y-3">
-            <ResultReveal market={market} position={position} />
-            {position && (BigInt(position.yes) > 0n || BigInt(position.no) > 0n) && (
-              <Button className="w-full" onClick={handleRedeem} disabled={busy || connecting}>
-                {busy ? 'Redeeming…' : wallet ? 'Redeem' : 'Connect & Redeem'}
-              </Button>
-            )}
-            {nextRound && (
-              <p className="text-sm text-[var(--muted)]">
-                Next round is live: <a className="underline" href={`/market/${nextRound.id}`}>{nextRound.question}</a>
-              </p>
-            )}
-          </div>
-        )}
+        <Button className="mt-4 w-full" onClick={handleTrade} disabled={!isOpen || busy}>
+          {busy ? 'Submitting…' : isOpen ? `Buy ${side}` : 'Market closed'}
+        </Button>
 
         {txResult && (
-          <p className="mt-3 text-sm text-[var(--muted)]">
-            Submitted: <span className="font-mono">{shortAddress(txResult)}</span>
-          </p>
+          <p className="mt-2 text-sm text-green-500">Trade confirmed: {txResult}</p>
         )}
+        {txError && <p className="mt-2 text-sm text-red-500">{txError}</p>}
+
+        <ResultReveal market={market} position={position} nextRound={nextRound} />
       </CardBody>
     </Card>
   );
