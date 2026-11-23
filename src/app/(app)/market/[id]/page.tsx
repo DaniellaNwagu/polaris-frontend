@@ -23,6 +23,26 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
     queryFn: () => api.getMarket(id),
     refetchInterval: (query) => (isPollableStatus(query.state.data?.status) ? RESOLUTION_POLL_MS : false),
   });
+  // Validate the untrusted `rolloverFrom` param: only honor it when it names a
+  // market the backend tracks, on the same feed, already terminal, and created
+  // before this one — the relationship `useNextRound` defines. Otherwise the
+  // redeem in TradeCard.handleTrade would target an arbitrary contract.
+  const { data: rolloverCandidate } = useQuery({
+    queryKey: ['market', rolloverFrom],
+    queryFn: () => api.getMarket(rolloverFrom!),
+    enabled: !!rolloverFrom,
+    retry: false,
+  });
+  const validRolloverFrom =
+    rolloverFrom &&
+    rolloverCandidate &&
+    market &&
+    rolloverCandidate.feedId === market.feedId &&
+    !isPollableStatus(rolloverCandidate.status) &&
+    rolloverCandidate.status !== 'pending' &&
+    new Date(rolloverCandidate.createdAt).getTime() < new Date(market.createdAt).getTime()
+      ? rolloverFrom
+      : undefined;
   const { data: price } = useQuery({
     queryKey: ['price', id],
     queryFn: () => api.getPrice(id),
@@ -107,7 +127,7 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
       >
         <TradeCard
           marketId={id}
-          rolloverFromMarketId={rolloverFrom}
+          rolloverFromMarketId={validRolloverFrom}
           className="max-h-[70vh] overflow-y-auto rounded-none border-0 bg-transparent shadow-none lg:max-h-none lg:overflow-visible lg:rounded-2xl lg:border lg:border-[var(--line)] lg:bg-[var(--surface)] lg:shadow-sm"
           bodyClassName="p-0 lg:p-5"
         />
