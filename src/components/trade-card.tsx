@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, messageFromApiError } from '@/lib/api';
 import { useWallet } from '@/lib/wallet-provider';
-import { callAsWallet } from '@/lib/freighter-wallet';
+import { callAsWallet, UserCancelledError } from '@/lib/freighter-wallet';
 import { Card, CardBody } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -74,6 +74,7 @@ export function TradeCard({
   const [busy, setBusy] = useState(false);
   const [txResult, setTxResult] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
+  const [txCancelled, setTxCancelled] = useState(false);
 
   const { data: market } = useQuery({
     queryKey: ['market', marketId],
@@ -183,100 +184,8 @@ export function TradeCard({
     if (!state || !fee) return;
     setTxError(null);
     setTxResult(null);
+    setTxCancelled(false);
 
-    // No wallet yet — the Freighter connect prompt only fires now, at the
-    // moment of commit, so a visitor can pick a side, an amount, and see the
-    // payout before ever touching a wallet. `connectWallet` returns the
-    // fresh wallet directly rather than relying on `wallet` from context,
-    // which won't reflect the new value until the next render.
-    let activeWallet = wallet;
-    if (!activeWallet) {
-      activeWallet = await connectWallet();
-      if (!activeWallet) return; // failed/cancelled — `walletError` from context already explains why
-    }
+    // No wallet yet — the Freighter connect prompt only fires now, a
 
-    setBusy(true);
-    try {
-      if (rolloverFromMarketId && rolloverAmount > 0n) {
-        await callAsWallet(activeWallet, rolloverFromMarketId, 'redeem', {});
-        await queryClient.invalidateQueries({ queryKey: ['position', rolloverFromMarketId, activeWallet.address] });
-      }
-
-      const stroops = xlmToStroops(amount);
-      const estimate = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
-      const minSharesOut = withSlippageTolerance(estimate, SLIPPAGE_TOLERANCE_BPS);
-      const { txHash } = await callAsWallet(activeWallet, marketId, 'buy', {
-        prediction: side,
-        collateral_amount: stroops.toString(),
-        min_shares_out: minSharesOut.toString(),
-      });
-      setTxResult(txHash);
-      // Embed lifecycle: a trade confirmed. Payload is only the side and the
-      // tx hash — no address, balance, or position size.
-      emitEmbedEvent('polaris:trade', { side, txHash });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['position', marketId, activeWallet.address] }),
-        queryClient.invalidateQueries({ queryKey: ['price', marketId] }),
-      ]);
-    } catch (err) {
-      setTxError(messageFromApiError(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Card className={className}>
-      <CardBody className={bodyClassName}>
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Trade</h2>
-          {wallet ? (
-            <span className="text-xs text-[var(--muted)]">{shortAddress(wallet.address)}</span>
-          ) : (
-            <Button variant="secondary" onClick={() => connectWallet()} disabled={connecting}>
-              {connecting ? 'Connecting…' : 'Connect wallet'}
-            </Button>
-          )}
-        </div>
-
-        {walletError && <p className="mt-2 text-sm text-red-500">{walletError}</p>}
-
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <Button variant={side === 'Yes' ? 'primary' : 'secondary'} onClick={() => setSide('Yes')}>
-            Yes
-          </Button>
-          <Button variant={side === 'No' ? 'primary' : 'secondary'} onClick={() => setSide('No')}>
-            No
-          </Button>
-        </div>
-
-        <div className="mt-4">
-          <label className="text-sm text-[var(--muted)]" htmlFor="trade-amount">
-            Amount (XLM)
-          </label>
-          <Input
-            id="trade-amount"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            inputMode="decimal"
-            disabled={!isOpen || busy}
-          />
-          {payoutPreview && (
-            <p className="mt-1 text-xs text-[var(--muted)]">Payout if correct: ~{payoutPreview} XLM</p>
-          )}
-        </div>
-
-        <Button className="mt-4 w-full" onClick={handleTrade} disabled={!isOpen || busy}>
-          {busy ? 'Submitting…' : isOpen ? `Buy ${side}` : 'Market closed'}
-        </Button>
-
-        {txResult && (
-          <p className="mt-2 text-sm text-green-500">Trade confirmed: {txResult}</p>
-        )}
-        {txError && <p className="mt-2 text-sm text-red-500">{txError}</p>}
-
-        <ResultReveal market={market} position={position} nextRound={nextRound} />
-      </CardBody>
-    </Card>
-  );
-}
+/* … truncated 3800 chars — edit only what you need near the top … */
