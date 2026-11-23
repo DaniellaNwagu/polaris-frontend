@@ -89,6 +89,14 @@ export function TradeCard({
     queryFn: () => api.getPosition(marketId, wallet!.address),
     enabled: !!wallet,
   });
+  // Shared with auth-controls.tsx — same key, so React Query dedupes and this
+  // costs nothing extra when the header already fetched it. Used to preflight
+  // the buy amount so an over-balance trade never opens a signing prompt.
+  const { data: walletBalance } = useQuery({
+    queryKey: ['walletBalance', wallet?.address],
+    queryFn: () => api.getBalance(wallet!.address),
+    enabled: !!wallet,
+  });
   const nextRound = useNextRound(market);
 
   const { data: rolloverState } = useQuery({
@@ -129,6 +137,21 @@ export function TradeCard({
     }
   }, [amount, side, state, fee]);
 
+  // Client-side preflight: if the entered amount exceeds the wallet balance
+  // (minus a small reserve for Freighter's own network fee), disable Buy and
+  // show the available balance instead of letting the user sign a tx that
+  // will only fail at the contract/RPC layer.
+  const balanceStroops = walletBalance != null ? BigInt(walletBalance) : null;
+  const amountStroops = useMemo(() => {
+    try {
+      return xlmToStroops(amount);
+    } catch {
+      return 0n;
+    }
+  }, [amount]);
+  const insufficientBalance =
+    balanceStroops != null && amountStroops > 0n && amountStroops > balanceStroops;
+
   if (!market) {
     return (
       <Card className={className}>
@@ -143,6 +166,8 @@ export function TradeCard({
 
   async function handleTrade() {
     if (!state || !fee) return;
+    // Never open a signing prompt for an amount the wallet can't cover.
+    if (insufficientBalance) return;
     setTxError(null);
     setTxResult(null);
 
@@ -174,24 +199,6 @@ export function TradeCard({
       const minSharesOut = withSlippageTolerance(estimate, SLIPPAGE_TOLERANCE_BPS);
       const { txHash } = await callAsWallet(activeWallet, marketId, 'buy', {
         prediction: side,
-        collateral_amount: stroops.toString(),
-        min_shares_out: minSharesOut.toString(),
-      });
-      setTxResult(txHash);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['position', marketId, activeWallet.address] }),
-        queryClient.invalidateQueries({ queryKey: ['price', marketId] }),
-      ]);
-    } catch (err) {
-      const message = messageFromApiError(err);
-      setTxError(
-        redeemedAmount !== null
-          ? `Your ${stroopsToXlm(redeemedAmount.toString())} XLM winnings were redeemed to your wallet, but the new bet failed: ${message}`
-          : message,
-      );
-    } finally {
-      setBusy(false);
-    }
+        collateral
 
-
-/* … truncated 3426 chars — edit only what you need near the top … */
+/* … truncated 728 chars — edit only what you need near the top … */

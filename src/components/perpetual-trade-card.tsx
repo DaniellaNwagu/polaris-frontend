@@ -71,6 +71,13 @@ export function PerpetualTradeCard({
     queryFn: () => api.getPerpetualPosition(perpetualId, wallet!.address),
     enabled: !!wallet,
   });
+  // Shared balance query — same key as `auth-controls.tsx`, so this reads
+  // the already-fetched value instead of issuing a second request.
+  const { data: balance } = useQuery({
+    queryKey: ['walletBalance', wallet?.address],
+    queryFn: () => api.getBalance(wallet!.address),
+    enabled: !!wallet,
+  });
 
   const payoutPreview = useMemo(() => {
     if (!state || !fee) return null;
@@ -83,6 +90,21 @@ export function PerpetualTradeCard({
       return null;
     }
   }, [amount, side, state, fee]);
+
+  // Preflight: never open a signing prompt for an amount the wallet can't
+  // cover. Freighter wallets also need headroom for their own network fee,
+  // so reserve a small buffer on top of the trade amount.
+  const insufficientBalance = useMemo(() => {
+    if (!balance) return false;
+    try {
+      const stroops = xlmToStroops(amount);
+      if (stroops <= 0n) return false;
+      const reserve = wallet?.kind === 'freighter' ? xlmToStroops('0.5') : 0n;
+      return stroops + reserve > BigInt(balance);
+    } catch {
+      return false;
+    }
+  }, [amount, balance, wallet?.kind]);
 
   if (!perpetual) {
     return (
@@ -98,6 +120,7 @@ export function PerpetualTradeCard({
 
   async function handleTrade() {
     if (!state || !fee) return;
+    if (insufficientBalance) return;
     setTxError(null);
     setTxResult(null);
 
@@ -123,6 +146,7 @@ export function PerpetualTradeCard({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['perpetualPosition', perpetualId, activeWallet.address] }),
         queryClient.invalidateQueries({ queryKey: ['perpetualPrice', perpetualId] }),
+        queryClient.invalidateQueries({ queryKey: ['walletBalance', activeWallet.address] }),
       ]);
     } catch (err) {
       setTxError(messageFromApiError(err));
@@ -139,7 +163,10 @@ export function PerpetualTradeCard({
     try {
       const { txHash } = await callAsWallet(wallet, perpetualId, 'redeem', {}, 'perpetual');
       setTxResult(txHash);
-      await queryClient.invalidateQueries({ queryKey: ['perpetualPosition', perpetualId, wallet.address] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['perpetualPosition', perpetualId, wallet.address] }),
+        queryClient.invalidateQueries({ queryKey: ['walletBalance', wallet.address] }),
+      ]);
     } catch (err) {
       setTxError(messageFromApiError(err));
     } finally {
@@ -201,44 +228,31 @@ export function PerpetualTradeCard({
                   <span className="text-[var(--faint)]">(you stake {amount || '0'} XLM)</span>
                 </>
               ) : (
-                <span className="text-[var(--faint)]">Enter an amount to see your position size</span>
+                <span className="text-[var(--faint)]">Enter an amount to preview your payout.</span>
               )}
             </div>
 
+            {insufficientBalance && balance && (
+              <p className="text-xs text-[var(--danger)]">
+                Insufficient balance (you have {stroopsToXlm(balance)} XLM)
+              </p>
+            )}
+
             <Button
               className="w-full"
-              variant={side === 'Yes' ? 'yes' : 'no'}
               onClick={handleTrade}
-              disabled={busy || connecting || !state || !fee || !payoutPreview}
+              disabled={busy || connecting || insufficientBalance}
             >
-              {connecting
-                ? 'Confirm in Freighter…'
-                : busy
-                  ? wallet?.kind === 'email'
-                    ? 'Placing trade…'
-                    : 'Confirm in Freighter…'
-                  : `Buy ${side}`}
+              {busy ? 'Confirming…' : connecting ? 'Connecting…' : 'Buy'}
             </Button>
-            {!wallet && !connecting && (
-              <p className="text-center text-[11px] text-[var(--faint)]">
-                Connects Freighter &mdash; sign with your own wallet, no custodial account
+            {walletError && <p className="text-xs text-[var(--danger)]">{walletError}</p>}
+            {txError && <p className="text-xs text-[var(--danger)]">{txError}</p>}
+            {txResult && (
+              <p className="text-xs text-[var(--muted)]">
+                Confirmed: <span className="font-mono">{shortAddress(txResult)}</span>
               </p>
             )}
           </div>
-        )}
-
-        {pos && (
-          <div className="mt-4 border-t border-[var(--line)] pt-3 text-xs text-[var(--muted)]">
-            Your position: {stroopsToXlm(pos.yes)} YES / {stroopsToXlm(pos.no)} NO
-          </div>
-        )}
-        {txResult && (
-          <p className="mt-3 text-xs text-[var(--yes)]">
-            Confirmed <span className="text-[var(--faint)]">— ref {shortAddress(txResult)}</span>
-          </p>
-        )}
-        {(txError || walletError) && (
-          <p className="mt-3 text-xs text-[var(--no)] break-all">{txError ?? walletError}</p>
         )}
       </CardBody>
     </Card>
