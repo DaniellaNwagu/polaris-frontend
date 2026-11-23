@@ -72,13 +72,20 @@ export function PerpetualTradeCard({
     enabled: !!wallet,
   });
 
-  const payoutPreview = useMemo(() => {
+  // Computed once here and reused by both the preview and `handleTrade` so
+  // the displayed "minimum if price moves" is exactly the `min_shares_out`
+  // actually submitted.
+  const preview = useMemo(() => {
     if (!state || !fee) return null;
     try {
       const stroops = xlmToStroops(amount);
       if (stroops <= 0n) return null;
-      const bonus = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
-      return stroopsToXlm((stroops + bonus).toString());
+      const estimate = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
+      const minSharesOut = withSlippageTolerance(estimate, SLIPPAGE_TOLERANCE_BPS);
+      return {
+        payout: stroopsToXlm((stroops + estimate).toString()),
+        minSharesOut: stroopsToXlm(minSharesOut.toString()),
+      };
     } catch {
       return null;
     }
@@ -195,50 +202,31 @@ export function PerpetualTradeCard({
             </label>
 
             <div className="rounded-lg bg-[var(--surface-2)] px-3 py-2.5 text-sm">
-              {payoutPreview ? (
+              {preview ? (
                 <>
-                  You get <span className="font-semibold">{payoutPreview} XLM</span> of {side.toUpperCase()}{' '}
+                  You get <span className="font-semibold">{preview.payout} XLM</span> of {side.toUpperCase()}{' '}
                   <span className="text-[var(--faint)]">(you stake {amount || '0'} XLM)</span>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    Minimum if price moves: {preview.minSharesOut} XLM ({SLIPPAGE_TOLERANCE_BPS / 100}% tolerance)
+                  </p>
                 </>
               ) : (
-                <span className="text-[var(--faint)]">Enter an amount to see your position size</span>
+                <span className="text-[var(--muted)]">Enter an amount to see your payout.</span>
               )}
             </div>
 
-            <Button
-              className="w-full"
-              variant={side === 'Yes' ? 'yes' : 'no'}
-              onClick={handleTrade}
-              disabled={busy || connecting || !state || !fee || !payoutPreview}
-            >
-              {connecting
-                ? 'Confirm in Freighter…'
-                : busy
-                  ? wallet?.kind === 'email'
-                    ? 'Placing trade…'
-                    : 'Confirm in Freighter…'
-                  : `Buy ${side}`}
-            </Button>
-            {!wallet && !connecting && (
-              <p className="text-center text-[11px] text-[var(--faint)]">
-                Connects Freighter &mdash; sign with your own wallet, no custodial account
+            {txError && <p className="text-sm text-[var(--no)]">{txError}</p>}
+            {txResult && (
+              <p className="text-sm text-[var(--yes)]">
+                Trade submitted: <span className="font-mono">{shortAddress(txResult)}</span>
               </p>
             )}
-          </div>
-        )}
+            {walletError && <p className="text-sm text-[var(--no)]">{walletError}</p>}
 
-        {pos && (
-          <div className="mt-4 border-t border-[var(--line)] pt-3 text-xs text-[var(--muted)]">
-            Your position: {stroopsToXlm(pos.yes)} YES / {stroopsToXlm(pos.no)} NO
+            <Button className="w-full" onClick={handleTrade} disabled={busy || connecting || !preview}>
+              {busy ? 'Submitting…' : connecting ? 'Connecting…' : wallet ? `Buy ${side.toUpperCase()}` : 'Connect wallet'}
+            </Button>
           </div>
-        )}
-        {txResult && (
-          <p className="mt-3 text-xs text-[var(--yes)]">
-            Confirmed <span className="text-[var(--faint)]">— ref {shortAddress(txResult)}</span>
-          </p>
-        )}
-        {(txError || walletError) && (
-          <p className="mt-3 text-xs text-[var(--no)] break-all">{txError ?? walletError}</p>
         )}
       </CardBody>
     </Card>
