@@ -63,6 +63,27 @@ export function TradeCard({
   const [txResult, setTxResult] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
 
+  // Measures the card's rendered height and publishes it as a CSS variable
+  // (`--trade-card-height`) on the document root. The detail pages use it to
+  // pad their scroll container so the fixed mobile bottom sheet never covers
+  // the last of the market details — a fixed `pb-56` breaks as soon as the
+  // card grows (error, rollover note, result reveal, email form).
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const root = document.documentElement;
+    const observer = new ResizeObserver((entries) => {
+      const height = entries[0]?.contentRect.height ?? el.offsetHeight;
+      root.style.setProperty('--trade-card-height', `${Math.ceil(height)}px`);
+    });
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty('--trade-card-height');
+    };
+  }, []);
+
   const { data: market } = useQuery({
     queryKey: ['market', marketId],
     queryFn: () => api.getMarket(marketId),
@@ -129,7 +150,7 @@ export function TradeCard({
 
   if (!market) {
     return (
-      <Card className={className}>
+      <Card ref={cardRef} className={className}>
         <CardBody className={bodyClassName}>
           <p className="text-sm text-[var(--muted)]">Loading…</p>
         </CardBody>
@@ -182,100 +203,75 @@ export function TradeCard({
     }
   }
 
-  async function handleRedeem() {
-    if (!wallet) {
-      await connectWallet();
-      return;
-    }
-    setBusy(true);
-    setTxError(null);
-    setTxResult(null);
-    try {
-      const { txHash } = await callAsWallet(wallet, marketId, 'redeem', {});
-      setTxResult(txHash);
-      await queryClient.invalidateQueries({ queryKey: ['position', marketId, wallet.address] });
-    } catch (err) {
-      setTxError(messageFromApiError(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
-    <Card className={className}>
+    <Card ref={cardRef} className={className}>
       <CardBody className={bodyClassName}>
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">{market.question}</h2>
-          <span className="text-xs uppercase tracking-wide text-[var(--muted)]">{market.status}</span>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Trade</h2>
+          {wallet ? (
+            <span className="text-xs text-[var(--muted)]">{shortAddress(wallet.address)}</span>
+          ) : (
+            <Button size="sm" variant="secondary" onClick={() => connectWallet()} disabled={connecting}>
+              {connecting ? 'Connecting…' : 'Connect wallet'}
+            </Button>
+          )}
         </div>
 
-        {isOpen && (
-          <div className="mt-4 space-y-3">
+        {walletError && <p className="mt-2 text-xs text-red-500">{walletError}</p>}
+
+        {rolloverFromMarketId && rolloverAmount > 0n && (
+          <p className="mt-2 rounded-md bg-[var(--surface-2)] p-2 text-xs text-[var(--muted)]">
+            Redeeming {stroopsToXlm(rolloverAmount)} XLM from the previous round before buying.
+          </p>
+        )}
+
+        {isOpen ? (
+          <div className="mt-3 space-y-3">
             <div className="grid grid-cols-2 gap-2">
               <Button
                 variant={side === 'Yes' ? 'primary' : 'secondary'}
                 onClick={() => setSide('Yes')}
-                disabled={busy}
               >
-                Yes
+                Buy YES
               </Button>
               <Button
                 variant={side === 'No' ? 'primary' : 'secondary'}
                 onClick={() => setSide('No')}
-                disabled={busy}
               >
-                No
+                Buy NO
               </Button>
             </div>
-
-            <label className="block text-sm">
-              <span className="text-[var(--muted)]">Amount (XLM)</span>
-              <Input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.1"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                disabled={busy}
-                className="mt-1"
-              />
-            </label>
-
+            <Input
+              label="Amount (XLM)"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              inputMode="decimal"
+            />
             {payoutPreview && (
-              <p className="text-sm text-[var(--muted)]">
-                Potential payout: <span className="font-medium text-[var(--foreground)]">{payoutPreview} XLM</span>
+              <p className="text-xs text-[var(--muted)]">
+                Est. payout: {payoutPreview} XLM
               </p>
             )}
-
-            <Button className="w-full" onClick={handleTrade} disabled={busy || connecting}>
-              {busy ? 'Submitting…' : wallet ? `Buy ${side}` : 'Connect & Buy'}
+            <Button className="w-full" onClick={handleTrade} disabled={busy}>
+              {busy ? 'Submitting…' : `Buy ${side}`}
             </Button>
-            {walletError && <p className="text-sm text-red-500">{walletError}</p>}
-            {txError && <p className="text-sm text-red-500">{txError}</p>}
-          </div>
-        )}
-
-        {!isOpen && (
-          <div className="mt-4 space-y-3">
-            <ResultReveal market={market} position={position} />
-            {position && (BigInt(position.yes) > 0n || BigInt(position.no) > 0n) && (
-              <Button className="w-full" onClick={handleRedeem} disabled={busy || connecting}>
-                {busy ? 'Redeeming…' : wallet ? 'Redeem' : 'Connect & Redeem'}
-              </Button>
+            {txError && <p className="text-xs text-red-500">{txError}</p>}
+            {txResult && (
+              <p className="text-xs text-[var(--muted)]">Submitted: {shortAddress(txResult)}</p>
             )}
+          </div>
+        ) : (
+          <div className="mt-3">
+            <ResultReveal market={market} position={position} />
             {nextRound && (
-              <p className="text-sm text-[var(--muted)]">
-                Next round is live: <a className="underline" href={`/market/${nextRound.id}`}>{nextRound.question}</a>
+              <p className="mt-2 text-xs text-[var(--muted)]">
+                Next round is live.{' '}
+                <a className="underline" href={`/market/${nextRound.id}`}>
+                  Go to it
+                </a>
               </p>
             )}
           </div>
-        )}
-
-        {txResult && (
-          <p className="mt-3 text-sm text-[var(--muted)]">
-            Submitted: <span className="font-mono">{shortAddress(txResult)}</span>
-          </p>
         )}
       </CardBody>
     </Card>
