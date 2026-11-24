@@ -48,7 +48,7 @@ export function PerpetualTradeCard({
   const [txResult, setTxResult] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
 
-  const { data: perpetual } = useQuery({
+  const { data: perpetual, isLoading } = useQuery({
     queryKey: ['perpetual', perpetualId],
     queryFn: () => api.getPerpetual(perpetualId),
   });
@@ -84,11 +84,20 @@ export function PerpetualTradeCard({
     }
   }, [amount, side, state, fee]);
 
-  if (!perpetual) {
+  if (isLoading) {
     return (
       <Card className={className}>
         <CardBody className={bodyClassName}>
           <p className="text-sm text-[var(--muted)]">Loading…</p>
+        </CardBody>
+      </Card>
+    );
+  }
+  if (!perpetual) {
+    return (
+      <Card className={className}>
+        <CardBody className={bodyClassName}>
+          <p className="text-sm text-[var(--muted)]">Perpetual unavailable.</p>
         </CardBody>
       </Card>
     );
