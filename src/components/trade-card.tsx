@@ -244,7 +244,7 @@ export function TradeCard({
 
             {payoutPreview && (
               <p className="text-sm text-[var(--muted)]">
-                Potential payout: <span className="font-medium text-[var(--foreground)]">{payoutPreview} XLM</span>
+                Potential payout: <span className="font-medium text-[var(--ink)]">{payoutPreview} XLM</span>
               </p>
             )}
 
