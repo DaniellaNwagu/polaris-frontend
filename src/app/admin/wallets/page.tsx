@@ -52,7 +52,9 @@ export default function AdminWalletsPage() {
             <h2 className="text-sm font-semibold">Email wallets</h2>
             <Badge tone="accent">{data.emailWallets.length} total</Badge>
           </div>
-          <p className="mb-3 text-xs text-[var(--faint)]">Exhaustive — every one is created by this backend.</p>
+          <p className="mb-3 text-xs text-[var(--faint)]">
+            Exhaustive — every one is created by this backend.
+          </p>
           {data.emailWallets.length === 0 ? (
             <p className="text-sm text-[var(--faint)]">None yet.</p>
           ) : (
@@ -77,6 +79,30 @@ export default function AdminWalletsPage() {
                     <div className="font-mono text-xs text-[var(--faint)]">{shortAddress(w.address)}</div>
                   </div>
                   <div className="text-xs text-[var(--faint)]">{formatDateTime(w.createdAt)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardBody>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">Passkey addresses seen</h2>
+            <Badge tone="accent">{data.passkeyAddressesSeen.length} total</Badge>
+          </div>
+          <p className="mb-3 text-xs text-[var(--faint)]">
+            Not exhaustive — there&apos;s no registry, on-chain or off, of every passkey wallet ever deployed.
+            This is only addresses that have made at least one trade since this dashboard shipped.
+          </p>
+          {data.passkeyAddressesSeen.length === 0 ? (
+            <p className="text-sm text-[var(--faint)]">None seen yet.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-1 font-mono text-xs sm:grid-cols-2">
+              {data.passkeyAddressesSeen.map((address) => (
+                <div key={address} className="text-[var(--faint)]">
+                  {shortAddress(address)}
                 </div>
               ))}
             </div>

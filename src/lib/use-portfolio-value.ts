@@ -19,8 +19,12 @@ import { qk } from '@/lib/query-keys';
  */
 export function usePortfolioValue(): { total: bigint; hasPosition: boolean } | null {
   const { wallet } = useWallet();
-  const { data: markets } = useQuery({ queryKey: qk.markets.list(), queryFn: api.listMarkets, enabled: !!wallet });
-  const { data: perpetuals } = useQuery({ queryKey: qk.perpetuals.list(), queryFn: api.listPerpetuals, enabled: !!wallet });
+  const { data: markets } = useQuery({ queryKey: ['markets'], queryFn: api.listMarkets, enabled: !!wallet });
+  const { data: perpetuals } = useQuery({
+    queryKey: ['perpetuals'],
+    queryFn: api.listPerpetuals,
+    enabled: !!wallet,
+  });
 
   const marketResults = useQueries({
     queries: (markets ?? []).map((m) => ({

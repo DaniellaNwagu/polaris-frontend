@@ -161,8 +161,11 @@ export function TradeCard({
   });
   const rolloverStatus = (rolloverState?.status ?? null) as MarketStatus | null;
   const rolloverAmount =
-    validatedRolloverId && rolloverStatus && rolloverStatus !== 'Open' && rolloverPosition
-      ? redeemableValue(rolloverStatus, { yes: BigInt(rolloverPosition.yes), no: BigInt(rolloverPosition.no) })
+    rolloverStatus && rolloverStatus !== 'Open' && rolloverPosition
+      ? redeemableValue(rolloverStatus, {
+          yes: BigInt(rolloverPosition.yes),
+          no: BigInt(rolloverPosition.no),
+        })
       : 0n;
 
   // Prefill the amount field with the rollover payout exactly once — not on
@@ -280,7 +283,9 @@ export function TradeCard({
     try {
       if (rolloverFromMarketId && rolloverAmount > 0n) {
         await callAsWallet(activeWallet, rolloverFromMarketId, 'redeem', {});
-        await invalidateAfterTrade(queryClient, { kind: 'market', id: rolloverFromMarketId, address: activeWallet.address });
+        await queryClient.invalidateQueries({
+          queryKey: ['position', rolloverFromMarketId, activeWallet.address],
+        });
       }
 
       const stroops = xlmToStroops(amount);
@@ -318,7 +323,8 @@ export function TradeCard({
 
   const pos = position ? { yes: BigInt(position.yes), no: BigInt(position.no) } : null;
   const onChainStatus = (state?.status ?? null) as MarketStatus | null;
-  const canRedeem = pos && onChainStatus && onChainStatus !== 'Open' && redeemableValue(onChainStatus, pos) > 0n;
+  const canRedeem =
+    pos && onChainStatus && onChainStatus !== 'Open' && redeemableValue(onChainStatus, pos) > 0n;
 
   return (
     <Card className={className}>
@@ -329,7 +335,9 @@ export function TradeCard({
               <ResultReveal
                 status={onChainStatus}
                 position={pos}
-                nextRoundHref={nextRound ? `/market/${nextRound.contractId}?rolloverFrom=${marketId}` : undefined}
+                nextRoundHref={
+                  nextRound ? `/market/${nextRound.contractId}?rolloverFrom=${marketId}` : undefined
+                }
               />
             ) : (
               <p className="text-sm text-[var(--muted)]">Trading is closed.</p>
@@ -365,4 +373,55 @@ export function TradeCard({
               </p>
             )}
 
-/* … truncated 3800 chars — edit only what you need near the top … */
+            <div className="rounded-lg bg-[var(--surface-2)] px-3 py-2.5 text-sm">
+              {payoutPreview ? (
+                <>
+                  You get <span className="font-semibold">{payoutPreview} XLM</span> if {side.toUpperCase()}{' '}
+                  wins <span className="text-[var(--faint)]">(you stake {amount || '0'} XLM)</span>
+                </>
+              ) : (
+                <span className="text-[var(--faint)]">Enter an amount to see your payout</span>
+              )}
+            </div>
+
+            <Button
+              className="w-full"
+              variant={side === 'Yes' ? 'yes' : 'no'}
+              onClick={handleTrade}
+              disabled={busy || connecting || !state || !fee || !payoutPreview}
+            >
+              {connecting
+                ? 'Confirm in Freighter…'
+                : busy
+                  ? wallet?.kind === 'email'
+                    ? rolloverAmount > 0n
+                      ? 'Rolling into this round…'
+                      : 'Placing bet…'
+                    : 'Confirm in Freighter…'
+                  : `Buy ${side}`}
+            </Button>
+            {!wallet && !connecting && (
+              <p className="text-center text-[11px] text-[var(--faint)]">
+                Connects Freighter &mdash; sign with your own wallet, no custodial account
+              </p>
+            )}
+          </div>
+        )}
+
+        {pos && (
+          <div className="mt-4 border-t border-[var(--line)] pt-3 text-xs text-[var(--muted)]">
+            Your position: {stroopsToXlm(pos.yes)} YES / {stroopsToXlm(pos.no)} NO
+          </div>
+        )}
+        {txResult && (
+          <p className="mt-3 text-xs text-[var(--yes)]">
+            Confirmed <span className="text-[var(--faint)]">— ref {shortAddress(txResult)}</span>
+          </p>
+        )}
+        {(txError || walletError) && (
+          <p className="mt-3 text-xs text-[var(--no)] break-all">{txError ?? walletError}</p>
+        )}
+      </CardBody>
+    </Card>
+  );
+}

@@ -30,7 +30,12 @@ function ChgCell({ yesBpsChange }: { yesBpsChange: number | null | undefined }) 
   const pct = Math.round(yesBpsChange / 100);
   const color = pct > 0 ? 'var(--yes)' : pct < 0 ? 'var(--no)' : 'var(--muted)';
   const sign = pct > 0 ? '+' : '';
-  return <span style={{ color }}>{sign}{pct}%</span>;
+  return (
+    <span style={{ color }}>
+      {sign}
+      {pct}%
+    </span>
+  );
 }
 
 /**
@@ -118,48 +123,45 @@ function MarketRow({ contractId }: { contractId: string }) {
  * linked from there, now a watchlist-style list rather than a card grid.
  */
 export default function AllMarketsPage() {
-  const { data: markets, isLoading, error } = useQuery({
-    queryKey: qk.markets.list(),
+  const {
+    data: markets,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ['markets'],
     queryFn: api.listMarkets,
     refetchInterval: 30_000,
   });
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Markets</h1>
-        <p className="text-sm text-muted-foreground">
-          Browse open markets and place your predictions.
-        </p>
-      </div>
+    <div>
+      <h1 className="mb-1 text-2xl font-bold">All markets</h1>
+      <p className="mb-6 text-sm text-[var(--muted)]">Every XLM/USD market, open or closed.</p>
 
-      {markets.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No open markets yet.</p>
-      ) : (
-        <div
-          role="table"
-          aria-label="Open markets"
-          className="divide-y rounded-lg border"
-        >
-          <div
-            role="row"
-            className="flex items-center gap-4 px-4 py-2 text-xs font-medium text-muted-foreground"
-          >
-            <span role="columnheader" className="flex-1">
-              Market
-            </span>
-            <span role="columnheader" className="w-16 shrink-0 text-right">
-              Yes
-            </span>
-            <span role="columnheader" className="w-16 shrink-0 text-right">
-              No
-            </span>
-            <span role="columnheader" className="w-16 shrink-0 text-right">
-              Chg
-            </span>
-            <span role="columnheader" className="w-20 shrink-0 text-right">
-              Status
-            </span>
+      {isLoading && <p className="text-sm text-[var(--muted)]">Loading markets…</p>}
+      {error && (
+        <p className="text-sm text-[var(--no)]">
+          Couldn&rsquo;t reach the backend: {(error as Error).message}
+        </p>
+      )}
+      {markets && markets.length === 0 && (
+        <p className="text-sm text-[var(--muted)]">No markets yet — an admin can create one from /create.</p>
+      )}
+
+      {markets && markets.length > 0 && (
+        <Card className="overflow-hidden">
+          <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-x-3 border-b border-[var(--line)] px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--faint)] sm:gap-x-5 sm:px-5">
+            <span />
+            <span>Market</span>
+            <span className="text-right">Yes</span>
+            <span className="text-right">No</span>
+            <span className="text-right">Chg</span>
+            <span className="hidden text-right sm:block">Status</span>
+          </div>
+          <div className="divide-y divide-[var(--line)]">
+            {markets.map((m) => (
+              <MarketRow key={m.contractId} contractId={m.contractId} />
+            ))}
           </div>
           {markets.map((market) => {
             const yesPercent = Math.round(market.yesPrice * 100);

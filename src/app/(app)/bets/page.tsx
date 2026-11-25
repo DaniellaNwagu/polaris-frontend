@@ -45,8 +45,14 @@ function PositionGate({
 
 function PositionRow({ contractId }: { contractId: string }) {
   const { wallet } = useWallet();
-  const { data: market } = useQuery({ queryKey: qk.market.detail(contractId), queryFn: () => api.getMarket(contractId) });
-  const { data: state } = useQuery({ queryKey: qk.market.state(contractId), queryFn: () => api.getMarketState(contractId) });
+  const { data: market } = useQuery({
+    queryKey: ['market', contractId],
+    queryFn: () => api.getMarket(contractId),
+  });
+  const { data: state } = useQuery({
+    queryKey: ['state', contractId],
+    queryFn: () => api.getMarketState(contractId),
+  });
   const { data: position } = useQuery({
     queryKey: qk.market.position(contractId, wallet?.address),
     queryFn: () => api.getPosition(contractId, wallet!.address),
@@ -72,9 +78,7 @@ function PositionRow({ contractId }: { contractId: string }) {
       <Card className="transition-shadow hover:shadow-md">
         <CardBody className="flex items-center justify-between">
           <div>
-            <div className="text-sm font-semibold">
-              Will XLM be ≥ {centsToUsd(market.strikePriceCents)}?
-            </div>
+            <div className="text-sm font-semibold">Will XLM be ≥ {centsToUsd(market.strikePriceCents)}?</div>
             <div className="mt-1 text-xs text-[var(--muted)]">
               {stroopsToXlm(pos.yes)} YES / {stroopsToXlm(pos.no)} NO
             </div>
@@ -84,7 +88,11 @@ function PositionRow({ contractId }: { contractId: string }) {
             <div className="mt-1">
               {win === true && <Badge tone="yes">won</Badge>}
               {win === false && <Badge tone="no">lost</Badge>}
-              {win === null && <Badge tone={status === 'Open' ? 'accent' : 'neutral'}>{status === 'Open' ? 'mark-to-market' : status.toLowerCase()}</Badge>}
+              {win === null && (
+                <Badge tone={status === 'Open' ? 'accent' : 'neutral'}>
+                  {status === 'Open' ? 'mark-to-market' : status.toLowerCase()}
+                </Badge>
+              )}
             </div>
           </div>
         </CardBody>
@@ -135,7 +143,8 @@ function PerpetualPositionRow({ contractId }: { contractId: string }) {
   // `redeemableValue` only knows the classic-market status union, so
   // `'Cancelled'` is the equivalent case here, not a re-derivation of the
   // same math.
-  const value = isOpen && price ? markToMarket(pos, price.yesBps, price.noBps) : redeemableValue('Cancelled', pos);
+  const value =
+    isOpen && price ? markToMarket(pos, price.yesBps, price.noBps) : redeemableValue('Cancelled', pos);
 
   return (
     <Link href={`/perpetual/${contractId}`}>
@@ -182,8 +191,8 @@ export default function PortfolioPage() {
     <div>
       <h1 className="mb-1 text-2xl font-bold">Portfolio</h1>
       <p className="mb-6 text-sm text-[var(--muted)]">
-        Values are marked at current implied price for open markets, or exact redeemable value once a
-        market resolves or is cancelled — see{' '}
+        Values are marked at current implied price for open markets, or exact redeemable value once a market
+        resolves or is cancelled — see{' '}
         <Link href="/docs" className="underline">
           docs
         </Link>{' '}
@@ -191,14 +200,10 @@ export default function PortfolioPage() {
       </p>
       <div className="space-y-3">
         {markets?.map((m) => (
-          <PositionGate key={m.contractId} contractId={m.contractId} kind="market">
-            <PositionRow contractId={m.contractId} />
-          </PositionGate>
+          <PositionRow key={m.contractId} contractId={m.contractId} />
         ))}
         {perpetuals?.map((p) => (
-          <PositionGate key={p.contractId} contractId={p.contractId} kind="perpetual">
-            <PerpetualPositionRow contractId={p.contractId} />
-          </PositionGate>
+          <PerpetualPositionRow key={p.contractId} contractId={p.contractId} />
         ))}
       </div>
     </div>

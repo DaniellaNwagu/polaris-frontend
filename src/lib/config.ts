@@ -34,7 +34,8 @@ if (isProduction) {
 export const config = {
   oracleUrl: process.env.NEXT_PUBLIC_ORACLE_URL ?? 'http://localhost:3001',
   stellarRpcUrl: process.env.NEXT_PUBLIC_STELLAR_RPC_URL ?? 'https://soroban-testnet.stellar.org',
-  stellarNetworkPassphrase: process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015',
+  stellarNetworkPassphrase:
+    process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015',
 };
 
 // Shared passphrase→network-name mapping. Used both by the wrong-network

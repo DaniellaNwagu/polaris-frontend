@@ -69,79 +69,19 @@ export default function AdminPerpetualsPage() {
       {error && <p className="text-sm text-red-500">{error}</p>}
       {actionError && <p className="text-sm text-red-500">{actionError}</p>}
 
-      {!rows ? (
-        <Skeleton className="h-40 w-full" />
-      ) : rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No perpetuals tracked yet.</p>
-      ) : (
-        <div className="space-y-4">
-          {rows.map(({ watched, state, stateError }) => (
-            <Card key={watched.contractId}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                <CardTitle className="text-base">
-                  <Link href={`/perpetual/${watched.contractId}`} className="hover:underline">
-                    <Address value={watched.contractId} />
-                  </Link>
-                </CardTitle>
-                <Badge variant={watched.status === 'terminated' ? 'destructive' : 'default'}>
-                  {watched.status}
-                </Badge>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                {stateError ? (
-                  <p className="text-red-500">{stateError}</p>
-                ) : state ? (
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    <div>
-                      <div className="text-muted-foreground">Pool Yes</div>
-                      <div>{state.poolYes}</div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground">Pool No</div>
-                      <div>{state.poolNo}</div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground">Last checkpoint</div>
-                      <div>
-                        {hasCheckpoint(state)
-                          ? `${formatCents(state.lastPriceCents)} · ${formatDate(Number(state.lastPriceAt))}`
-                          : '—'}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground">Status</div>
-                      <div>{state.status}</div>
-                    </div>
-                  </div>
-                ) : null}
-
-                {watched.lastError && <p className="text-red-500">{watched.lastError}</p>}
-
-                {watched.status !== 'terminated' && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Input
-                      type="number"
-                      min={1}
-                      placeholder="Price (cents)"
-                      value={checkpointPrice}
-                      onChange={(e) => setCheckpointPrice(e.target.value)}
-                      className="w-40"
-                    />
-                    <Button
-                      size="sm"
-                      onClick={() => void recordCheckpoint(watched.contractId)}
-                      disabled={busyId === watched.contractId}
-                    >
-                      Record checkpoint
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => void terminate(watched.contractId)}
-                      disabled={busyId === watched.contractId}
-                    >
-                      Terminate
-                    </Button>
+      <div className="space-y-3">
+        {perpetuals?.map((p) => (
+          <Card key={p.contractId}>
+            <CardBody className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="font-mono text-xs text-[var(--faint)]">{shortAddress(p.contractId)}</div>
+                <div className="text-sm font-semibold">XLM/USD perpetual</div>
+                {p.lastError && (
+                  <div className="mt-1 text-xs text-[var(--no)] max-w-md break-all">{p.lastError}</div>
+                )}
+                {lastCheckpoint[p.contractId] && (
+                  <div className="mt-1 text-xs text-[var(--muted)]">
+                    Last checkpoint: {lastCheckpoint[p.contractId]}
                   </div>
                 )}
               </CardContent>

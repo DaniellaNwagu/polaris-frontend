@@ -105,16 +105,7 @@ export function EmbedCodeButton({ contractId }: { contractId: string }) {
             </p>
           )}
           <p className="text-xs text-[var(--faint)]">
-            Your site&apos;s CSP must allow this origin in <code>frame-src</code>. See the{' '}
-            <a
-              className="underline"
-              href="https://github.com/PolarisQ-xyz/polaris-frontend/blob/main/docs/EMBEDDING.md"
-              target="_blank"
-              rel="noreferrer"
-            >
-              embed integration guide
-            </a>{' '}
-            for sizing, sandboxing, and wallet behavior.
+            No special permissions needed — Freighter and the email fallback both work inside the embed as-is.
           </p>
         </div>
       )}

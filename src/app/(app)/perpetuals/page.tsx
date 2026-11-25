@@ -57,8 +57,12 @@ function PerpetualCard({ contractId }: { contractId: string }) {
  * client so polling continues after hydration.
  */
 export default function AllPerpetualsPage() {
-  const { data: perpetuals, isLoading, error } = useQuery({
-    queryKey: qk.perpetuals.list(),
+  const {
+    data: perpetuals,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ['perpetuals'],
     queryFn: api.listPerpetuals,
     refetchInterval: 30_000,
   });
@@ -70,16 +74,11 @@ export default function AllPerpetualsPage() {
         Continuous XLM/USD markets — no expiry, trade any time.
       </p>
 
+      {isLoading && <p className="text-sm text-[var(--muted)]">Loading perpetuals…</p>}
       {error && (
-        <div className="flex items-center gap-3 text-sm text-[var(--no)]">
-          <span>Markets are temporarily unavailable.</span>
-          <Link
-            href="/perpetuals"
-            className="rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--fg)] hover:bg-[var(--surface)]"
-          >
-            Retry
-          </Link>
-        </div>
+        <p className="text-sm text-[var(--no)]">
+          Couldn&rsquo;t reach the backend: {(error as Error).message}
+        </p>
       )}
       {perpetuals && perpetuals.length === 0 && (
         <p className="text-sm text-[var(--muted)]">No perpetuals yet — an admin can create one.</p>

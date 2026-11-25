@@ -47,9 +47,14 @@ export function AuthControls() {
 
   if (address) {
     return (
-      <div className="flex items-center gap-3 text-sm">
-        <span className="font-mono text-xs text-neutral-400">
-          {email ?? `${address.slice(0, 4)}…${address.slice(-4)}`}
+      <div className="flex items-center gap-2">
+        {balance && (
+          <span className="text-xs font-mono text-[var(--muted)]">
+            {stroopsToXlm(balance.balanceStroops)} XLM
+          </span>
+        )}
+        <span className="rounded-full bg-[var(--surface-2)] px-3 py-1.5 text-xs font-mono">
+          {shortAddress(wallet.address)}
         </span>
         <button
           type="button"
@@ -94,12 +99,39 @@ export function AuthControls() {
           >
             {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
           </button>
-          <button
-            type="button"
-            onClick={resetEmailFlow}
-            className="text-xs text-neutral-400 underline-offset-2 hover:underline"
-          >
-            Use a different email
+        </form>
+      );
+    }
+
+    return (
+      <form
+        className="flex flex-col items-end gap-1"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void requestEmailCode(email);
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <input
+            autoFocus
+            type="email"
+            disabled={emailBusy}
+            className={`${inputClass} w-36 disabled:opacity-60`}
+            placeholder="you@email.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <Button size={btnSize} type="submit" disabled={emailBusy || !email}>
+            {emailBusy ? 'Sending…' : 'Send code'}
+          </Button>
+        </div>
+        {freighterAvailable === false ? (
+          <a href="https://freighter.app" target="_blank" rel="noopener noreferrer" className={linkClass}>
+            Don&rsquo;t have Freighter? Install it →
+          </a>
+        ) : (
+          <button type="button" onClick={() => setShowEmail(false)} className={linkClass}>
+            Use a wallet instead
           </button>
         </div>
       </form>
@@ -122,7 +154,22 @@ export function AuthControls() {
         disabled={busy || !emailInput}
         className="rounded bg-white px-3 py-1 text-xs font-medium text-black disabled:opacity-50"
       >
-        {busy ? 'Sending…' : 'Email me a code'}
+        {compact ? (
+          'Connect Wallet'
+        ) : (
+          <>
+            <span className="sm:hidden">Connect</span>
+            <span className="hidden sm:inline">Connect Wallet</span>
+          </>
+        )}
+      </Button>
+      {firstTimeIntent && (
+        <p className="max-w-[220px] text-right text-[11px] text-[var(--muted)]">
+          Connects Freighter — sign every trade yourself, no custodial account.
+        </p>
+      )}
+      <button type="button" onClick={() => setShowEmail(true)} className={linkClass}>
+        or use email
       </button>
     </form>
   );

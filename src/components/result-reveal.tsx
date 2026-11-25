@@ -53,21 +53,22 @@ export function ResultReveal({
         : null;
 
   return (
-    <div role="status" aria-live="polite" aria-atomic="true">
-      {resolved && (
-        <div
-          className={['result-reveal', `result-reveal--${tone}`, 'result-reveal--in', compact ? 'result-reveal--compact' : '']
-            .filter(Boolean)
-            .join(' ')}
-        >
-          <p className="result-reveal__headline">{headline}</p>
-          {detail && <p className="result-reveal__detail">{detail}</p>}
-          {nextRoundHref && (
-            <Link href={nextRoundHref} className="result-reveal__next">
-              Next round is live →
-            </Link>
-          )}
-        </div>
+    <div
+      className={[
+        'result-reveal',
+        `result-reveal--${tone}`,
+        'result-reveal--in',
+        compact ? 'result-reveal--compact' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <p className="result-reveal__headline">{headline}</p>
+      {detail && <p className="result-reveal__detail">{detail}</p>}
+      {nextRoundHref && (
+        <Link href={nextRoundHref} className="result-reveal__next">
+          Next round is live →
+        </Link>
       )}
     </div>
   );

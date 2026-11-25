@@ -157,32 +157,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   }, [amount, side, state, fee]);
 
   if (!market) {
-    if (marketPending) {
-      return (
-        <div className="p-4 text-center text-sm text-[var(--muted)]">Loading…</div>
-      );
-    }
-    if (marketError) {
-      const status = (marketError as { status?: number }).status;
-      if (status === 404) {
-        return (
-          <div className="p-4 text-center text-sm text-[var(--muted)]">
-            This market doesn&rsquo;t exist (check the embed code)
-          </div>
-        );
-      }
-      return (
-        <div className="space-y-2 p-4 text-center">
-          <p className="text-sm text-[var(--muted)]">Couldn&rsquo;t load this market.</p>
-          <Button size="sm" variant="outline" onClick={() => void refetchMarket()}>
-            Retry
-          </Button>
-        </div>
-      );
-    }
-    return (
-      <div ref={rootRef} className="p-4 text-sm text-[var(--muted)]">Loading…</div>
-    );
+    return <div className="p-4 text-sm text-[var(--muted)]">Loading…</div>;
   }
 
   const isOpen = market.status === 'watching';
@@ -203,13 +178,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
     setBusy(true);
     try {
       const stroops = xlmToStroops(amount);
-      const estimate = estimateBuyOut(
-        side,
-        stroops,
-        BigInt(state.poolYes),
-        BigInt(state.poolNo),
-        fee.feeBps,
-      );
+      const estimate = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
       const minSharesOut = withSlippageTolerance(estimate, SLIPPAGE_TOLERANCE_BPS);
       const { txHash } = await callAsWallet(activeWallet, id, 'buy', {
         prediction: side,
@@ -242,9 +211,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
             {!isOpen && <span className="text-xs text-[var(--faint)]">{statusLabel(market.status)}</span>}
           </div>
 
-          <h2 className="text-sm font-semibold leading-snug">
-            XLM ≥ {centsToUsd(market.strikePriceCents)}?
-          </h2>
+          <h2 className="text-sm font-semibold leading-snug">XLM ≥ {centsToUsd(market.strikePriceCents)}?</h2>
           <p className="-mt-1.5 text-[10px] text-[var(--faint)]">
             Can&rsquo;t lose more than you stake &mdash; funds are locked until the market settles.
           </p>
@@ -287,12 +254,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
           ) : (
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
-                <Button
-                  size="sm"
-                  variant={side === 'Yes' ? 'yes' : 'outline'}
-                  onClick={() => setSide('Yes')}
-                  className="h-11 min-h-11"
-                >
+                <Button size="sm" variant={side === 'Yes' ? 'yes' : 'outline'} onClick={() => setSide('Yes')}>
                   YES
                 </Button>
                 <Button
@@ -309,3 +271,59 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 inputMode="decimal"
+                placeholder="XLM amount"
+              />
+              {payoutPreview && (
+                <p className="text-[10px] text-[var(--faint)]">
+                  You get <span className="font-semibold text-[var(--ink)]">{payoutPreview} XLM</span> if{' '}
+                  {side.toUpperCase()} wins
+                </p>
+              )}
+              <Button
+                size="sm"
+                className="w-full"
+                variant={side === 'Yes' ? 'yes' : 'no'}
+                onClick={handleTrade}
+                disabled={busy || connecting || !state || !fee || !payoutPreview}
+              >
+                {connecting
+                  ? 'Confirm in Freighter…'
+                  : busy
+                    ? wallet?.kind === 'email'
+                      ? 'Placing bet…'
+                      : 'Confirm in Freighter…'
+                    : `Buy ${side}`}
+              </Button>
+              {!wallet && !connecting && (
+                <p className="text-center text-[10px] text-[var(--faint)]">
+                  Connects Freighter &mdash; sign with your own wallet
+                </p>
+              )}
+            </div>
+          )}
+
+          {(txResult || txError || walletError) && (
+            <p
+              className={`text-[10px] ${txError || walletError ? 'text-[var(--no)] break-all' : 'text-[var(--yes)]'}`}
+            >
+              {txError ?? walletError ?? (
+                <>
+                  Confirmed <span className="text-[var(--faint)]">— ref {shortAddress(txResult!)}</span>
+                </>
+              )}
+            </p>
+          )}
+          {walletError && !wallet && !showEmailFallback && (
+            <button
+              type="button"
+              onClick={() => setPreferEmail(true)}
+              className="text-[10px] text-[var(--faint)] underline"
+            >
+              Try email instead
+            </button>
+          )}
+        </CardBody>
+      </Card>
+    </div>
+  );
+}

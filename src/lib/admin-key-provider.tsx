@@ -94,14 +94,8 @@ export function AdminKeyProvider({ children }: { children: React.ReactNode }) {
     window.sessionStorage.setItem(STORAGE_KEY, key);
   }, []);
 
-  const lock = useCallback(() => {
-    window.sessionStorage.removeItem(STORAGE_KEY);
-    setAdminKeyState('');
-    setStatus('unset');
-  }, []);
-
   return (
-    <AdminKeyContext.Provider value={{ adminKey, setAdminKey, status, lock }}>{children}</AdminKeyContext.Provider>
+    <AdminKeyContext.Provider value={{ adminKey, setAdminKey, status }}>{children}</AdminKeyContext.Provider>
   );
 }
 
