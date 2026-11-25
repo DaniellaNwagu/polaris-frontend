@@ -34,6 +34,42 @@ export function centsToUsd(cents: string | bigint): string {
   return `$${whole.toString()}.${frac}`;
 }
 
+export type DisplayCurrency = 'stroops' | 'xlm' | 'usd';
+
+export const DISPLAY_CURRENCIES: readonly DisplayCurrency[] = ['stroops', 'xlm', 'usd'];
+
+export const DISPLAY_CURRENCY_LABELS: Record<DisplayCurrency, string> = {
+  stroops: 'Stroops',
+  xlm: 'XLM',
+  usd: 'USD equivalent',
+};
+
+export function isDisplayCurrency(value: unknown): value is DisplayCurrency {
+  return typeof value === 'string' && (DISPLAY_CURRENCIES as readonly string[]).includes(value);
+}
+
+/**
+ * Formats a stroop amount in the user's display currency. `usd` needs the
+ * current XLM/USD price in cents; with no rate yet (still loading, or the
+ * feed is down) it falls back to XLM rather than showing a made-up dollar
+ * figure. USD is rounded down to the cent, an estimate not a quote.
+ */
+export function formatStroops(
+  stroops: string | bigint,
+  currency: DisplayCurrency = 'xlm',
+  xlmUsdCents?: number | null,
+): string {
+  const value = typeof stroops === 'string' ? BigInt(stroops) : stroops;
+  if (currency === 'stroops') {
+    return `${value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')} stroops`;
+  }
+  if (currency === 'usd' && xlmUsdCents != null && Number.isFinite(xlmUsdCents) && xlmUsdCents > 0) {
+    const cents = (value * BigInt(Math.round(xlmUsdCents))) / STROOPS_PER_XLM;
+    return `≈ ${centsToUsd(cents)}`;
+  }
+  return `${stroopsToXlm(value)} XLM`;
+}
+
 export function formatCountdown(expiryUnixSecs: number): string {
   const diff = expiryUnixSecs * 1000 - Date.now();
   if (diff <= 0) return 'expired';

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { QueryProvider } from '@/lib/query-provider';
 import { WalletProvider } from '@/lib/wallet-provider';
+import { DisplayCurrencyProvider } from '@/lib/display-currency';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -22,7 +23,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <QueryProvider>
-          <WalletProvider>{children}</WalletProvider>
+          <DisplayCurrencyProvider>
+            <WalletProvider>{children}</WalletProvider>
+          </DisplayCurrencyProvider>
         </QueryProvider>
       </body>
     </html>
