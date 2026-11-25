@@ -6,20 +6,60 @@ import { useWallet } from '@/lib/wallet-provider';
 import { api } from '@/lib/api';
 import { Card, CardBody } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { AuthControls } from '@/components/auth-controls';
 import { centsToUsd, stroopsToXlm } from '@/lib/format';
 import { didWin, markToMarket, redeemableValue, type MarketStatus } from '@/lib/portfolio';
+import { qk } from '@/lib/query-keys';
+
+/**
+ * Fetches only the position for a single market/perpetual. Returns `null`
+ * when the wallet holds nothing, so the parent can skip mounting the full
+ * row (and its market/state/price queries) for markets the user doesn't
+ * hold — keeping request count proportional to positions held rather than
+ * to the total number of markets ever created.
+ */
+function PositionGate({
+  contractId,
+  kind,
+  children,
+}: {
+  contractId: string;
+  kind: 'market' | 'perpetual';
+  children: React.ReactNode;
+}) {
+  const { wallet } = useWallet();
+  const { data: position } = useQuery({
+    queryKey: [kind === 'market' ? 'position' : 'perpetualPosition', contractId, wallet?.address],
+    queryFn: () =>
+      kind === 'market'
+        ? api.getPosition(contractId, wallet!.address)
+        : api.getPerpetualPosition(contractId, wallet!.address),
+    enabled: !!wallet,
+  });
+
+  if (!position) return null;
+  if (BigInt(position.yes) === 0n && BigInt(position.no) === 0n) return null;
+  return <>{children}</>;
+}
 
 function PositionRow({ contractId }: { contractId: string }) {
   const { wallet } = useWallet();
-  const { data: market } = useQuery({ queryKey: ['market', contractId], queryFn: () => api.getMarket(contractId) });
-  const { data: state } = useQuery({ queryKey: ['state', contractId], queryFn: () => api.getMarketState(contractId) });
+  const { data: market } = useQuery({
+    queryKey: ['market', contractId],
+    queryFn: () => api.getMarket(contractId),
+  });
+  const { data: state } = useQuery({
+    queryKey: ['state', contractId],
+    queryFn: () => api.getMarketState(contractId),
+  });
   const { data: position } = useQuery({
-    queryKey: ['position', contractId, wallet?.address],
+    queryKey: qk.market.position(contractId, wallet?.address),
     queryFn: () => api.getPosition(contractId, wallet!.address),
     enabled: !!wallet,
   });
   const { data: price } = useQuery({
-    queryKey: ['price', contractId],
+    queryKey: qk.market.price(contractId),
     queryFn: () => api.getPrice(contractId),
     enabled: state?.status === 'Open',
   });
@@ -38,9 +78,7 @@ function PositionRow({ contractId }: { contractId: string }) {
       <Card className="transition-shadow hover:shadow-md">
         <CardBody className="flex items-center justify-between">
           <div>
-            <div className="text-sm font-semibold">
-              Will XLM be ≥ {centsToUsd(market.strikePriceCents)}?
-            </div>
+            <div className="text-sm font-semibold">Will XLM be ≥ {centsToUsd(market.strikePriceCents)}?</div>
             <div className="mt-1 text-xs text-[var(--muted)]">
               {stroopsToXlm(pos.yes)} YES / {stroopsToXlm(pos.no)} NO
             </div>
@@ -50,7 +88,11 @@ function PositionRow({ contractId }: { contractId: string }) {
             <div className="mt-1">
               {win === true && <Badge tone="yes">won</Badge>}
               {win === false && <Badge tone="no">lost</Badge>}
-              {win === null && <Badge tone={status === 'Open' ? 'accent' : 'neutral'}>{status === 'Open' ? 'mark-to-market' : status.toLowerCase()}</Badge>}
+              {win === null && (
+                <Badge tone={status === 'Open' ? 'accent' : 'neutral'}>
+                  {status === 'Open' ? 'mark-to-market' : status.toLowerCase()}
+                </Badge>
+              )}
             </div>
           </div>
         </CardBody>
@@ -71,20 +113,20 @@ function PositionRow({ contractId }: { contractId: string }) {
 function PerpetualPositionRow({ contractId }: { contractId: string }) {
   const { wallet } = useWallet();
   const { data: perpetual } = useQuery({
-    queryKey: ['perpetual', contractId],
+    queryKey: qk.perpetual.detail(contractId),
     queryFn: () => api.getPerpetual(contractId),
   });
   const { data: state } = useQuery({
-    queryKey: ['perpetualState', contractId],
+    queryKey: qk.perpetual.state(contractId),
     queryFn: () => api.getPerpetualState(contractId),
   });
   const { data: position } = useQuery({
-    queryKey: ['perpetualPosition', contractId, wallet?.address],
+    queryKey: qk.perpetual.position(contractId, wallet?.address),
     queryFn: () => api.getPerpetualPosition(contractId, wallet!.address),
     enabled: !!wallet,
   });
   const { data: price } = useQuery({
-    queryKey: ['perpetualPrice', contractId],
+    queryKey: qk.perpetual.price(contractId),
     queryFn: () => api.getPerpetualPrice(contractId),
     enabled: state?.status === 'Open',
   });
@@ -101,7 +143,8 @@ function PerpetualPositionRow({ contractId }: { contractId: string }) {
   // `redeemableValue` only knows the classic-market status union, so
   // `'Cancelled'` is the equivalent case here, not a re-derivation of the
   // same math.
-  const value = isOpen && price ? markToMarket(pos, price.yesBps, price.noBps) : redeemableValue('Cancelled', pos);
+  const value =
+    isOpen && price ? markToMarket(pos, price.yesBps, price.noBps) : redeemableValue('Cancelled', pos);
 
   return (
     <Link href={`/perpetual/${contractId}`}>
@@ -127,27 +170,41 @@ function PerpetualPositionRow({ contractId }: { contractId: string }) {
 
 export default function PortfolioPage() {
   const { wallet } = useWallet();
-  const { data: markets } = useQuery({ queryKey: ['markets'], queryFn: api.listMarkets });
-  const { data: perpetuals } = useQuery({ queryKey: ['perpetuals'], queryFn: api.listPerpetuals });
+  const { data: markets } = useQuery({ queryKey: qk.markets.list(), queryFn: api.listMarkets });
+  const { data: perpetuals } = useQuery({ queryKey: qk.perpetuals.list(), queryFn: api.listPerpetuals });
 
   if (!wallet) {
-    return <p className="text-sm text-[var(--muted)]">Connect your wallet to see your positions.</p>;
+    return (
+      <div>
+        <h1 className="mb-1 text-2xl font-bold">Portfolio</h1>
+        <p className="mb-4 text-sm text-[var(--muted)]">Connect your wallet to see your positions.</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button onClick={() => connectWallet()}>Connect Wallet</Button>
+          <span className="text-sm text-[var(--muted)]">or use email</span>
+          <AuthControls />
+        </div>
+      </div>
+    );
   }
 
   return (
     <div>
       <h1 className="mb-1 text-2xl font-bold">Portfolio</h1>
       <p className="mb-6 text-sm text-[var(--muted)]">
-        Values are marked at current implied price for open markets, or exact redeemable value once a
-        market resolves or is cancelled — see{' '}
+        Values are marked at current implied price for open markets, or exact redeemable value once a market
+        resolves or is cancelled — see{' '}
         <Link href="/docs" className="underline">
           docs
         </Link>{' '}
         for what this build does and doesn&rsquo;t track.
       </p>
       <div className="space-y-3">
-        {markets?.map((m) => <PositionRow key={m.contractId} contractId={m.contractId} />)}
-        {perpetuals?.map((p) => <PerpetualPositionRow key={p.contractId} contractId={p.contractId} />)}
+        {markets?.map((m) => (
+          <PositionRow key={m.contractId} contractId={m.contractId} />
+        ))}
+        {perpetuals?.map((p) => (
+          <PerpetualPositionRow key={p.contractId} contractId={p.contractId} />
+        ))}
       </div>
     </div>
   );

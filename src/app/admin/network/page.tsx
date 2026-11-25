@@ -6,12 +6,15 @@ import { useAdminKey } from '@/lib/admin-key-provider';
 import { Card, CardBody } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { shortAddress } from '@/lib/format';
+import { qk } from '@/lib/query-keys';
 
 function ConfigRow({ label, value }: { label: string; value: string | undefined }) {
   return (
     <div className="flex items-center justify-between border-t border-[var(--line)] py-2 text-sm first:border-t-0 first:pt-0">
       <div className="text-[var(--faint)]">{label}</div>
-      <div className="font-mono text-xs">{value ? shortAddress(value) : <span className="text-[var(--no)]">not configured</span>}</div>
+      <div className="font-mono text-xs">
+        {value ? shortAddress(value) : <span className="text-[var(--no)]">not configured</span>}
+      </div>
     </div>
   );
 }
@@ -19,7 +22,7 @@ function ConfigRow({ label, value }: { label: string; value: string | undefined 
 export default function AdminNetworkPage() {
   const { adminKey } = useAdminKey();
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['admin', 'network', adminKey],
+    queryKey: qk.admin.network(adminKey),
     queryFn: () => api.getAdminNetwork(adminKey),
     refetchInterval: 30_000,
   });
@@ -35,7 +38,9 @@ export default function AdminNetworkPage() {
       <Card className="mb-6">
         <CardBody className="flex items-center justify-between">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--faint)]">RPC health</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--faint)]">
+              RPC health
+            </div>
             <div className="mt-1 text-lg font-bold">{isError ? 'Unreachable' : data?.status}</div>
           </div>
           <Badge tone={isError ? 'no' : 'yes'}>{isError ? 'down' : 'healthy'}</Badge>

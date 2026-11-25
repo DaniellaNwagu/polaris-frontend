@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useMemo, useState } from 'react';
+import { use, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, messageFromApiError } from '@/lib/api';
 import { useWallet } from '@/lib/wallet-provider';
@@ -22,8 +22,21 @@ import {
 import { estimateBuyOut, withSlippageTolerance } from '@/lib/amm';
 import type { MarketStatus } from '@/lib/portfolio';
 import { useNextRound } from '@/lib/use-next-round';
+import { LogoMark } from '@/components/logo-mark';
+import { invalidateAfterTrade, qk } from '@/lib/query-keys';
 
 const SLIPPAGE_TOLERANCE_BPS = 200; // 2%
+
+/**
+ * Post a lifecycle event to the host page embedding this widget. Payloads
+ * intentionally carry no wallet address, balance, or position size — only
+ * the event name and, for trades, the side and tx hash. See the embed guide
+ * for the documented schema.
+ */
+function postToHost(type: string, payload: Record<string, unknown> = {}) {
+  if (typeof window === 'undefined' || window.parent === window) return;
+  window.parent.postMessage({ type, ...payload }, '*');
+}
 
 /**
  * The embeddable version of the market detail page — meant to run inside a
@@ -37,6 +50,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   const { id } = use(params);
   const { wallet, connecting, error: walletError, freighterAvailable, connectWallet } = useWallet();
   const queryClient = useQueryClient();
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const [side, setSide] = useState<'Yes' | 'No'>('Yes');
   const [amount, setAmount] = useState('10');
@@ -48,20 +62,43 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   // whenever this browser/webview has no Freighter extension at all.
   const [preferEmail, setPreferEmail] = useState(false);
   const showEmailFallback = !wallet && (preferEmail || freighterAvailable === false);
+  // Set when the email flow "succeeds" but the session cookie can't be used
+  // from inside this iframe (third-party cookies blocked/partitioned). We
+  // must not show a signed-in state that can't trade — instead point the
+  // user at the main app in a new tab.
+  const [emailSessionBlocked, setEmailSessionBlocked] = useState(false);
+  const openInPolarisHref =
+    typeof window !== 'undefined' ? `${window.location.origin}/market/${id}` : '#';
+
+  // Report the widget's content height to the host page so it can size the
+  // iframe to fit — otherwise taller states (email fallback, ResultReveal,
+  // multi-line errors) clip or scroll and shorter ones leave dead space.
+  // Payload is intentionally just { type, height } — no wallet/position data.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof window === 'undefined' || window.parent === window) return;
+    const post = () => {
+      window.parent.postMessage({ type: 'polaris:resize', height: el.scrollHeight }, '*');
+    };
+    post();
+    const observer = new ResizeObserver(post);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const { data: market } = useQuery({
-    queryKey: ['market', id],
+    queryKey: qk.market.detail(id),
     queryFn: () => api.getMarket(id),
     refetchInterval: (query) => (isPollableStatus(query.state.data?.status) ? RESOLUTION_POLL_MS : false),
   });
   const { data: price } = useQuery({
-    queryKey: ['price', id],
+    queryKey: qk.market.price(id),
     queryFn: () => api.getPrice(id),
     refetchInterval: 15_000,
     enabled: market?.status === 'watching',
   });
   const { data: state } = useQuery({
-    queryKey: ['state', id],
+    queryKey: qk.market.state(id),
     queryFn: () => api.getMarketState(id),
     // Was gated to only fetch while 'watching' — but the result moment
     // needs the resolved state (final price, pool balances) right after
@@ -69,17 +106,43 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
     refetchInterval: isPollableStatus(market?.status) ? RESOLUTION_POLL_MS : false,
   });
   const { data: fee } = useQuery({
-    queryKey: ['fee', id],
+    queryKey: qk.market.fee(id),
     queryFn: () => api.getFee(id),
     enabled: market?.status === 'watching',
     refetchInterval: 15_000,
   });
   const { data: position } = useQuery({
-    queryKey: ['position', id, wallet?.address],
+    queryKey: qk.market.position(id, wallet?.address),
     queryFn: () => api.getPosition(id, wallet!.address),
     enabled: !!wallet,
   });
   const nextRound = useNextRound(market);
+
+  // polaris:ready — fired once the widget has mounted and initialized.
+  useEffect(() => {
+    postToHost('polaris:ready');
+  }, []);
+
+  // polaris:connected — fired once a wallet connects in the embed. Guarded
+  // so it only fires on the transition into a connected state.
+  const wasConnected = useRef(false);
+  useEffect(() => {
+    if (wallet && !wasConnected.current) {
+      wasConnected.current = true;
+      postToHost('polaris:connected');
+    } else if (!wallet) {
+      wasConnected.current = false;
+    }
+  }, [wallet]);
+
+  // polaris:resolved — fired once the embedded market resolves.
+  const wasResolved = useRef(false);
+  useEffect(() => {
+    if (market && market.status === 'resolved' && !wasResolved.current) {
+      wasResolved.current = true;
+      postToHost('polaris:resolved');
+    }
+  }, [market]);
 
   const payoutPreview = useMemo(() => {
     if (!state || !fee) return null;
@@ -94,9 +157,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   }, [amount, side, state, fee]);
 
   if (!market) {
-    return (
-      <div className="p-4 text-sm text-[var(--muted)]">Loading…</div>
-    );
+    return <div className="p-4 text-sm text-[var(--muted)]">Loading…</div>;
   }
 
   const isOpen = market.status === 'watching';
@@ -117,13 +178,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
     setBusy(true);
     try {
       const stroops = xlmToStroops(amount);
-      const estimate = estimateBuyOut(
-        side,
-        stroops,
-        BigInt(state.poolYes),
-        BigInt(state.poolNo),
-        fee.feeBps,
-      );
+      const estimate = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
       const minSharesOut = withSlippageTolerance(estimate, SLIPPAGE_TOLERANCE_BPS);
       const { txHash } = await callAsWallet(activeWallet, id, 'buy', {
         prediction: side,
@@ -131,7 +186,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
         min_shares_out: minSharesOut.toString(),
       });
       setTxResult(txHash);
-      await queryClient.invalidateQueries({ queryKey: ['price', id] });
+      await invalidateAfterTrade(queryClient, { kind: 'market', id, address: activeWallet.address });
     } catch (err) {
       setTxError(messageFromApiError(err));
     } finally {
@@ -140,7 +195,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   }
 
   return (
-    <div className="p-3">
+    <div ref={rootRef} className="p-3">
       <Card>
         <CardBody className="space-y-3 p-4">
           <div className="flex items-center justify-between">
@@ -150,20 +205,13 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 text-xs font-semibold text-[var(--faint)] hover:text-[var(--accent-ink)]"
             >
-              <span
-                className="flex h-4 w-4 items-center justify-center rounded text-white"
-                style={{ background: 'linear-gradient(135deg, #5b4fe0, #8b7bff)', fontSize: 9 }}
-              >
-                ◈
-              </span>
+              <LogoMark size="xs" />
               Polaris
             </a>
             {!isOpen && <span className="text-xs text-[var(--faint)]">{statusLabel(market.status)}</span>}
           </div>
 
-          <h2 className="text-sm font-semibold leading-snug">
-            XLM ≥ {centsToUsd(market.strikePriceCents)}?
-          </h2>
+          <h2 className="text-sm font-semibold leading-snug">XLM ≥ {centsToUsd(market.strikePriceCents)}?</h2>
           <p className="-mt-1.5 text-[10px] text-[var(--faint)]">
             Can&rsquo;t lose more than you stake &mdash; funds are locked until the market settles.
           </p>
@@ -181,24 +229,45 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
             ) : (
               <p className="text-xs text-[var(--muted)]">Trading closed.</p>
             )
+          ) : emailSessionBlocked ? (
+            <div className="space-y-2 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3">
+              <p className="text-xs text-[var(--muted)]">
+                Your browser blocked the sign-in session inside this embed. Open Polaris to
+                sign in with email and trade.
+              </p>
+              <a
+                href={openInPolarisHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-11 min-h-11 w-full items-center justify-center rounded-lg bg-[var(--accent-ink)] px-3 text-xs font-semibold text-white"
+              >
+                Open in Polaris to sign in with email
+              </a>
+            </div>
           ) : showEmailFallback ? (
-            <AuthControls compact />
+            <AuthControls
+              compact
+              autoFocus={false}
+              embed
+              onEmailSessionUnusable={() => setEmailSessionBlocked(true)}
+            />
           ) : (
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
-                <Button
-                  size="sm"
-                  variant={side === 'Yes' ? 'yes' : 'outline'}
-                  onClick={() => setSide('Yes')}
-                >
+                <Button size="sm" variant={side === 'Yes' ? 'yes' : 'outline'} onClick={() => setSide('Yes')}>
                   YES
                 </Button>
-                <Button size="sm" variant={side === 'No' ? 'no' : 'outline'} onClick={() => setSide('No')}>
+                <Button
+                  size="sm"
+                  variant={side === 'No' ? 'no' : 'outline'}
+                  onClick={() => setSide('No')}
+                  className="h-11 min-h-11"
+                >
                   NO
                 </Button>
               </div>
               <input
-                className="h-8 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2 text-xs"
+                className="h-11 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2 text-xs"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 inputMode="decimal"
@@ -206,7 +275,8 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
               />
               {payoutPreview && (
                 <p className="text-[10px] text-[var(--faint)]">
-                  You get <span className="font-semibold text-[var(--ink)]">{payoutPreview} XLM</span> if {side.toUpperCase()} wins
+                  You get <span className="font-semibold text-[var(--ink)]">{payoutPreview} XLM</span> if{' '}
+                  {side.toUpperCase()} wins
                 </p>
               )}
               <Button
