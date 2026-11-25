@@ -18,7 +18,19 @@ import { shortAddress, stroopsToXlm } from '@/lib/format';
  * signed-out) is identical between them — only sizing differs, via
  * `compact`.
  */
-export function AuthControls({ compact = false }: { compact?: boolean }) {
+export function AuthControls({
+  compact = false,
+  embed = false,
+}: {
+  compact?: boolean;
+  /**
+   * Set when rendered inside the `/embed/[id]` iframe. Email sign-in there
+   * depends on a third-party session cookie that Safari/Firefox/Chrome may
+   * block or partition (see #119), so the embed offers "Open in Polaris"
+   * instead of a signed-in state that can't actually trade.
+   */
+  embed?: boolean;
+}) {
   const {
     wallet,
     connecting,
@@ -30,6 +42,9 @@ export function AuthControls({ compact = false }: { compact?: boolean }) {
     verifyEmailCode,
     resetEmailFlow,
     logout,
+    logoutBusy,
+    logoutError,
+    emailSessionUnavailable,
   } = useWallet();
   const [showEmail, setShowEmail] = useState(false);
   const [email, setEmail] = useState('');
@@ -91,18 +106,57 @@ export function AuthControls({ compact = false }: { compact?: boolean }) {
 
   const linkClass = `${compact ? 'text-[10px]' : 'text-[11px]'} text-[var(--muted)] underline hover:text-[var(--ink)]`;
 
+  // #119: inside the embed, an email session that the browser won't persist
+  // (third-party cookie blocked/partitioned) must never look signed in — the
+  // next trade would fail. Offer a real path out instead.
+  if (embed && emailSessionUnavailable) {
+    return (
+      <div className="flex flex-col items-end gap-1">
+        <a
+          href={`${window.location.origin}/?new=1`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={linkClass}
+        >
+          Open in Polaris to sign in with email →
+        </a>
+        <p className="max-w-[220px] text-right text-[11px] text-[var(--muted)]">
+          Your browser blocks the sign-in cookie inside this embed.
+        </p>
+      </div>
+    );
+  }
+
   if (wallet) {
     return (
-      <div className="flex items-center gap-2">
-        {balance && (
-          <span className="text-xs font-mono text-[var(--muted)]">{stroopsToXlm(balance.balanceStroops)} XLM</span>
+      <div className="flex flex-col items-end gap-1">
+        <div className="flex items-center gap-2">
+          {balance && (
+            <span className="text-xs font-mono text-[var(--muted)]">{stroopsToXlm(balance.balanceStroops)} XLM</span>
+          )}
+          <span className="rounded-full bg-[var(--surface-2)] px-3 py-1.5 text-xs font-mono">
+            {shortAddress(wallet.address)}
+          </span>
+          <button
+            type="button"
+            onClick={() => void logout()}
+            disabled={logoutBusy}
+            title="Freighter has no programmatic revoke — revoke this site in Freighter to fully sign out."
+            className={`${linkClass} disabled:opacity-60`}
+          >
+            {logoutBusy ? 'Signing out…' : 'Disconnect (revoke in Freighter to fully sign out)'}
+          </button>
+        </div>
+        {logoutError && (
+          <div className="flex items-center gap-2">
+            <span role="alert" className="text-[11px] text-[var(--danger,red)]">
+              {logoutError}
+            </span>
+            <button type="button" onClick={() => void logout()} disabled={logoutBusy} className={linkClass}>
+              Retry
+            </button>
+          </div>
         )}
-        <span className="rounded-full bg-[var(--surface-2)] px-3 py-1.5 text-xs font-mono">
-          {shortAddress(wallet.address)}
-        </span>
-        <button type="button" onClick={logout} className={linkClass}>
-          Sign out
-        </button>
       </div>
     );
   }

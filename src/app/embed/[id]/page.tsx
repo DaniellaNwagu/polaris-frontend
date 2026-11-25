@@ -48,6 +48,13 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   // whenever this browser/webview has no Freighter extension at all.
   const [preferEmail, setPreferEmail] = useState(false);
   const showEmailFallback = !wallet && (preferEmail || freighterAvailable === false);
+  // Set when the email flow "succeeds" but the session cookie can't be used
+  // from inside this iframe (third-party cookies blocked/partitioned). We
+  // must not show a signed-in state that can't trade — instead point the
+  // user at the main app in a new tab.
+  const [emailSessionBlocked, setEmailSessionBlocked] = useState(false);
+  const openInPolarisHref =
+    typeof window !== 'undefined' ? `${window.location.origin}/market/${id}` : '#';
 
   const { data: market } = useQuery({
     queryKey: ['market', id],
@@ -182,8 +189,28 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
             ) : (
               <p className="text-xs text-[var(--muted)]">Trading closed.</p>
             )
+          ) : emailSessionBlocked ? (
+            <div className="space-y-2 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3">
+              <p className="text-xs text-[var(--muted)]">
+                Your browser blocked the sign-in session inside this embed. Open Polaris to
+                sign in with email and trade.
+              </p>
+              <a
+                href={openInPolarisHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-11 min-h-11 w-full items-center justify-center rounded-lg bg-[var(--accent-ink)] px-3 text-xs font-semibold text-white"
+              >
+                Open in Polaris to sign in with email
+              </a>
+            </div>
           ) : showEmailFallback ? (
-            <AuthControls compact autoFocus={false} />
+            <AuthControls
+              compact
+              autoFocus={false}
+              embed
+              onEmailSessionUnusable={() => setEmailSessionBlocked(true)}
+            />
           ) : (
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">

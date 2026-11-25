@@ -63,7 +63,7 @@ export function TradeCard({
   const [txResult, setTxResult] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
 
-  const { data: market } = useQuery({
+  const { data: market, isLoading } = useQuery({
     queryKey: ['market', marketId],
     queryFn: () => api.getMarket(marketId),
     // Keeps polling while a resolution could still land, so a bettor sitting
@@ -137,11 +137,20 @@ export function TradeCard({
     }
   }, [amount, side, state, fee]);
 
-  if (!market) {
+  if (isLoading) {
     return (
       <Card className={className}>
         <CardBody className={bodyClassName}>
           <p className="text-sm text-[var(--muted)]">Loading…</p>
+        </CardBody>
+      </Card>
+    );
+  }
+  if (!market) {
+    return (
+      <Card className={className}>
+        <CardBody className={bodyClassName}>
+          <p className="text-sm text-[var(--muted)]">Market unavailable.</p>
         </CardBody>
       </Card>
     );

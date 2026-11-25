@@ -17,7 +17,7 @@ export default function AdminMarketsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: markets } = useQuery({ queryKey: ['markets'], queryFn: api.listMarkets });
+  const { data: markets, isLoading } = useQuery({ queryKey: ['markets'], queryFn: api.listMarkets });
 
   async function act(action: 'settle' | 'cancel', contractId: string) {
     setBusyId(contractId);
@@ -38,6 +38,8 @@ export default function AdminMarketsPage() {
       <h1 className="mb-6 text-2xl font-bold">Markets</h1>
 
       {error && <p className="mb-4 text-sm text-[var(--no)] break-all">{error}</p>}
+
+      {isLoading && <p className="text-sm text-[var(--muted)]">Loading…</p>}
 
       <div className="space-y-3">
         {markets?.map((m) => (
