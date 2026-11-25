@@ -51,6 +51,11 @@ export function TradeCard({
    * market already closed), the user simply holds the redeemed collateral
    * in their own wallet — not a fund-safety issue, the same recoverable
    * failure shape `txError` already surfaces for any other failed buy.
+   *
+   * Because this typically arrives from a URL query param, it is treated as
+   * untrusted: it is only honored once `api.getMarket` confirms it is a
+   * terminal market on the same feed, created before this one. Otherwise it
+   * is ignored entirely and never reaches `callAsWallet`.
    */
   rolloverFromMarketId?: string;
 }) {
@@ -89,19 +94,40 @@ export function TradeCard({
   });
   const nextRound = useNextRound(market);
 
-  const { data: rolloverState } = useQuery({
-    queryKey: ['state', rolloverFromMarketId],
-    queryFn: () => api.getMarketState(rolloverFromMarketId!),
+  // `rolloverFromMarketId` comes straight from a URL query param, so it is
+  // attacker-controlled: anyone can share `/market/<real>?rolloverFrom=<any
+  // contract id>`. Only honor it when it names a market the backend actually
+  // tracks, on the same feed as this one, already terminal, and created
+  // before this market — the exact relationship `useNextRound` defines. An
+  // unknown/unrelated id must never reach `callAsWallet`'s redeem path.
+  const { data: rolloverMarket } = useQuery({
+    queryKey: ['market', rolloverFromMarketId],
+    queryFn: () => api.getMarket(rolloverFromMarketId!),
     enabled: !!rolloverFromMarketId,
+    retry: false,
+  });
+  const rolloverValid =
+    !!rolloverMarket &&
+    !!market &&
+    rolloverMarket.id !== market.id &&
+    rolloverMarket.feedId === market.feedId &&
+    rolloverMarket.status !== 'watching' &&
+    rolloverMarket.createdAt < market.createdAt;
+  const validatedRolloverId = rolloverValid ? rolloverFromMarketId : undefined;
+
+  const { data: rolloverState } = useQuery({
+    queryKey: ['state', validatedRolloverId],
+    queryFn: () => api.getMarketState(validatedRolloverId!),
+    enabled: !!validatedRolloverId,
   });
   const { data: rolloverPosition } = useQuery({
-    queryKey: ['position', rolloverFromMarketId, wallet?.address],
-    queryFn: () => api.getPosition(rolloverFromMarketId!, wallet!.address),
-    enabled: !!rolloverFromMarketId && !!wallet,
+    queryKey: ['position', validatedRolloverId, wallet?.address],
+    queryFn: () => api.getPosition(validatedRolloverId!, wallet!.address),
+    enabled: !!validatedRolloverId && !!wallet,
   });
   const rolloverStatus = (rolloverState?.status ?? null) as MarketStatus | null;
   const rolloverAmount =
-    rolloverStatus && rolloverStatus !== 'Open' && rolloverPosition
+    validatedRolloverId && rolloverStatus && rolloverStatus !== 'Open' && rolloverPosition
       ? redeemableValue(rolloverStatus, { yes: BigInt(rolloverPosition.yes), no: BigInt(rolloverPosition.no) })
       : 0n;
 
@@ -176,9 +202,9 @@ export function TradeCard({
 
     setBusy(true);
     try {
-      if (rolloverFromMarketId && rolloverAmount > 0n) {
-        await callAsWallet(activeWallet, rolloverFromMarketId, 'redeem', {});
-        await queryClient.invalidateQueries({ queryKey: ['position', rolloverFromMarketId, activeWallet.address] });
+      if (validatedRolloverId && rolloverAmount > 0n) {
+        await callAsWallet(activeWallet, validatedRolloverId, 'redeem', {});
+        await queryClient.invalidateQueries({ queryKey: ['position', validatedRolloverId, activeWallet.address] });
       }
 
       const stroops = xlmToStroops(amount);

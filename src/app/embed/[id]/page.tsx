@@ -56,7 +56,12 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   const openInPolarisHref =
     typeof window !== 'undefined' ? `${window.location.origin}/market/${id}` : '#';
 
-  const { data: market } = useQuery({
+  const {
+    data: market,
+    error: marketError,
+    isPending: marketPending,
+    refetch: refetchMarket,
+  } = useQuery({
     queryKey: ['market', id],
     queryFn: () => api.getMarket(id),
     refetchInterval: (query) => (isPollableStatus(query.state.data?.status) ? RESOLUTION_POLL_MS : false),
@@ -101,8 +106,31 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   }, [amount, side, state, fee]);
 
   if (!market) {
+    if (marketPending) {
+      return (
+        <div className="p-4 text-center text-sm text-[var(--muted)]">Loading…</div>
+      );
+    }
+    if (marketError) {
+      const status = (marketError as { status?: number }).status;
+      if (status === 404) {
+        return (
+          <div className="p-4 text-center text-sm text-[var(--muted)]">
+            This market doesn&rsquo;t exist (check the embed code)
+          </div>
+        );
+      }
+      return (
+        <div className="space-y-2 p-4 text-center">
+          <p className="text-sm text-[var(--muted)]">Couldn&rsquo;t load this market.</p>
+          <Button size="sm" variant="outline" onClick={() => void refetchMarket()}>
+            Retry
+          </Button>
+        </div>
+      );
+    }
     return (
-      <div className="p-4 text-sm text-[var(--muted)]">Loading…</div>
+      <div className="p-4 text-center text-sm text-[var(--muted)]">Loading…</div>
     );
   }
 
