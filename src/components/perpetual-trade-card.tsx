@@ -72,6 +72,13 @@ export function PerpetualTradeCard({
     queryFn: () => api.getPerpetualPosition(perpetualId, wallet!.address),
     enabled: !!wallet,
   });
+  // Shared balance query — same key as `auth-controls.tsx`, so this reads
+  // the already-fetched value instead of issuing a second request.
+  const { data: balance } = useQuery({
+    queryKey: ['walletBalance', wallet?.address],
+    queryFn: () => api.getBalance(wallet!.address),
+    enabled: !!wallet,
+  });
 
   // Computed once here and reused by both the preview and `handleTrade` so
   // the displayed "minimum if price moves" is exactly the `min_shares_out`
@@ -92,7 +99,22 @@ export function PerpetualTradeCard({
     }
   }, [amount, side, state, fee]);
 
-  if (isLoading) {
+  // Preflight: never open a signing prompt for an amount the wallet can't
+  // cover. Freighter wallets also need headroom for their own network fee,
+  // so reserve a small buffer on top of the trade amount.
+  const insufficientBalance = useMemo(() => {
+    if (!balance) return false;
+    try {
+      const stroops = xlmToStroops(amount);
+      if (stroops <= 0n) return false;
+      const reserve = wallet?.kind === 'freighter' ? xlmToStroops('0.5') : 0n;
+      return stroops + reserve > BigInt(balance);
+    } catch {
+      return false;
+    }
+  }, [amount, balance, wallet?.kind]);
+
+  if (!perpetual) {
     return (
       <Card className={className}>
         <CardBody className={bodyClassName}>
@@ -115,6 +137,7 @@ export function PerpetualTradeCard({
 
   async function handleTrade() {
     if (!state || !fee) return;
+    if (insufficientBalance) return;
     setTxError(null);
     setTxResult(null);
 
@@ -140,6 +163,7 @@ export function PerpetualTradeCard({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['perpetualPosition', perpetualId, activeWallet.address] }),
         queryClient.invalidateQueries({ queryKey: ['perpetualPrice', perpetualId] }),
+        queryClient.invalidateQueries({ queryKey: ['walletBalance', activeWallet.address] }),
       ]);
     } catch (err) {
       setTxError(messageFromApiError(err));
@@ -156,7 +180,10 @@ export function PerpetualTradeCard({
     try {
       const { txHash } = await callAsWallet(wallet, perpetualId, 'redeem', {}, 'perpetual');
       setTxResult(txHash);
-      await queryClient.invalidateQueries({ queryKey: ['perpetualPosition', perpetualId, wallet.address] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['perpetualPosition', perpetualId, wallet.address] }),
+        queryClient.invalidateQueries({ queryKey: ['walletBalance', wallet.address] }),
+      ]);
     } catch (err) {
       setTxError(messageFromApiError(err));
     } finally {
@@ -228,5 +255,35 @@ export function PerpetualTradeCard({
                 <>
                   You get <span className="font-semibold">{preview.payout} XLM</span> of {side.toUpperCase()}{' '}
                   <span className="text-[var(--faint)]">(you stake {amount || '0'} XLM)</span>
+                </>
+              ) : (
+                <span className="text-[var(--faint)]">Enter an amount to preview your payout.</span>
+              )}
+            </div>
 
-/* … truncated 896 chars — edit only what you need near the top … */
+            {insufficientBalance && balance && (
+              <p className="text-xs text-[var(--danger)]">
+                Insufficient balance (you have {stroopsToXlm(balance)} XLM)
+              </p>
+            )}
+
+            <Button
+              className="w-full"
+              onClick={handleTrade}
+              disabled={busy || connecting || insufficientBalance}
+            >
+              {busy ? 'Confirming…' : connecting ? 'Connecting…' : 'Buy'}
+            </Button>
+            {walletError && <p className="text-xs text-[var(--danger)]">{walletError}</p>}
+            {txError && <p className="text-xs text-[var(--danger)]">{txError}</p>}
+            {txResult && (
+              <p className="text-xs text-[var(--muted)]">
+                Confirmed: <span className="font-mono">{shortAddress(txResult)}</span>
+              </p>
+            )}
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
