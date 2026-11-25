@@ -16,6 +16,21 @@ function statusTone(status: string): 'yes' | 'no' | 'warn' | 'neutral' {
 }
 
 /**
+ * Formats a bps change into a signed percentage string. Sub-1% moves (the
+ * common case on a 1h lookback) keep one decimal place so a real 40 bps
+ * move reads as "+0.4%" instead of collapsing to "+0%"; at/above 1% we
+ * round to a whole percent to keep the column compact.
+ */
+export function formatBpsChange(yesBpsChange: number): string {
+  const pct = yesBpsChange / 100;
+  const sign = pct > 0 ? '+' : '';
+  if (Math.abs(pct) < 1) {
+    return `${sign}${pct.toFixed(1)}%`;
+  }
+  return `${sign}${Math.round(pct)}%`;
+}
+
+/**
  * `null` (never `0`) means "no history to compare against yet" — a market
  * younger than the backend's snapshot window, or the snapshot service
  * hasn't run long enough since a fresh deploy. Rendered as a plain dash,
@@ -27,15 +42,9 @@ function ChgCell({ yesBpsChange }: { yesBpsChange: number | null | undefined }) 
   if (yesBpsChange === null || yesBpsChange === undefined) {
     return <span className="text-[var(--faint)]">—</span>;
   }
-  const pct = Math.round(yesBpsChange / 100);
-  const color = pct > 0 ? 'var(--yes)' : pct < 0 ? 'var(--no)' : 'var(--muted)';
-  const sign = pct > 0 ? '+' : '';
-  return (
-    <span style={{ color }}>
-      {sign}
-      {pct}%
-    </span>
-  );
+  const color =
+    yesBpsChange > 0 ? 'var(--yes)' : yesBpsChange < 0 ? 'var(--no)' : 'var(--muted)';
+  return <span style={{ color }}>{formatBpsChange(yesBpsChange)}</span>;
 }
 
 /**
@@ -201,34 +210,18 @@ export default function AllMarketsPage() {
                   role="cell"
                   className="w-16 shrink-0 text-right text-sm"
                 >
-                  <span className="rounded bg-green-100 px-2 py-0.5 text-green-800">
-                    {formatPercent(yesPercent)}
-                  </span>
+                  {yesPercent}%
                 </span>
                 <span
                   role="cell"
                   className="w-16 shrink-0 text-right text-sm"
                 >
-                  <span className="rounded bg-red-100 px-2 py-0.5 text-red-800">
-                    {formatPercent(noPercent)}
-                  </span>
-                </span>
-                <span
-                  role="cell"
-                  className="w-16 shrink-0 text-right text-sm text-muted-foreground"
-                >
-                  —
-                </span>
-                <span
-                  role="cell"
-                  className="w-20 shrink-0 text-right text-sm text-muted-foreground"
-                >
-                  {closesIn}
+                  {noPercent}%
                 </span>
               </div>
             );
           })}
-        </div>
+        </Card>
       )}
     </div>
   );
