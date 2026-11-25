@@ -8,6 +8,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_ORACLE_URL: http://localhost:3001
+      NEXT_PUBLIC_STELLAR_RPC_URL: https://soroban-testnet.stellar.org
+      NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE: Test SDF Network ; September 2015
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,7 +19,20 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
       - run: npx tsc --noEmit
-      - run: npm test
+      - run: npm run test:coverage
+      - name: Coverage summary
+        if: always()
+        run: |
+          node -e '
+          const t = require("./coverage/coverage-summary.json").total;
+          const row = (k) => `| ${k} | ${t[k].pct}% | ${t[k].covered}/${t[k].total} |`;
+          console.log(["### src/lib coverage", "", "| Metric | % | Covered |", "|---|---|---|",
+            ...["lines", "statements", "functions", "branches"].map(row)].join("\n"));
+          ' >> "$GITHUB_STEP_SUMMARY"
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e

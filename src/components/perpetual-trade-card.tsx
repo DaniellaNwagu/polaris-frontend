@@ -72,18 +72,47 @@ export function PerpetualTradeCard({
     queryFn: () => api.getPerpetualPosition(perpetualId, wallet!.address),
     enabled: !!wallet,
   });
+  // Shared balance query — same key as `auth-controls.tsx`, so this reads
+  // the already-fetched value instead of issuing a second request.
+  const { data: balance } = useQuery({
+    queryKey: ['walletBalance', wallet?.address],
+    queryFn: () => api.getBalance(wallet!.address),
+    enabled: !!wallet,
+  });
 
-  const payoutPreview = useMemo(() => {
+  // Computed once here and reused by both the preview and `handleTrade` so
+  // the displayed "minimum if price moves" is exactly the `min_shares_out`
+  // actually submitted.
+  const preview = useMemo(() => {
     if (!state || !fee) return null;
     try {
       const stroops = xlmToStroops(amount);
       if (stroops <= 0n) return null;
-      const bonus = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
-      return stroopsToXlm((stroops + bonus).toString());
+      const estimate = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
+      const minSharesOut = withSlippageTolerance(estimate, SLIPPAGE_TOLERANCE_BPS);
+      return {
+        payout: stroopsToXlm((stroops + estimate).toString()),
+        minSharesOut: stroopsToXlm(minSharesOut.toString()),
+      };
     } catch {
       return null;
     }
   }, [amount, side, state, fee]);
+
+  // Preflight: never open a signing prompt for an amount the wallet can't
+  // cover. Freighter wallets also need headroom for their own network fee,
+  // so reserve a small buffer on top of the trade amount.
+  const insufficientBalance = useMemo(() => {
+    if (!balance) return false;
+    try {
+      const stroops = xlmToStroops(amount);
+      if (stroops <= 0n) return false;
+      const reserve = wallet?.kind === 'freighter' ? xlmToStroops('0.5') : 0n;
+      return stroops + reserve > BigInt(balance);
+    } catch {
+      return false;
+    }
+  }, [amount, balance, wallet?.kind]);
 
   if (!perpetual) {
     return (
@@ -94,11 +123,21 @@ export function PerpetualTradeCard({
       </Card>
     );
   }
+  if (!perpetual) {
+    return (
+      <Card className={className}>
+        <CardBody className={bodyClassName}>
+          <p className="text-sm text-[var(--muted)]">Perpetual unavailable.</p>
+        </CardBody>
+      </Card>
+    );
+  }
 
   const isOpen = perpetual.status === 'watching';
 
   async function handleTrade() {
     if (!state || !fee) return;
+    if (insufficientBalance) return;
     setTxError(null);
     setTxResult(null);
 
@@ -145,6 +184,18 @@ export function PerpetualTradeCard({
     }
   }
 
+  function handleSideChange(next: 'Yes' | 'No') {
+    setSide(next);
+    setTxResult(null);
+    setTxError(null);
+  }
+
+  function handleAmountChange(next: string) {
+    setAmount(next);
+    setTxResult(null);
+    setTxError(null);
+  }
+
   const pos = position ? { yes: BigInt(position.yes), no: BigInt(position.no) } : null;
   // `Terminated`'s payout is the exact same 0.5-collateral-per-complementary-pair
   // formula as a classic market's `Cancelled` — same reused math (see
@@ -175,10 +226,10 @@ export function PerpetualTradeCard({
         ) : (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
-              <Button variant={side === 'Yes' ? 'yes' : 'outline'} onClick={() => setSide('Yes')}>
+              <Button variant={side === 'Yes' ? 'yes' : 'outline'} onClick={() => handleSideChange('Yes')}>
                 YES
               </Button>
-              <Button variant={side === 'No' ? 'no' : 'outline'} onClick={() => setSide('No')}>
+              <Button variant={side === 'No' ? 'no' : 'outline'} onClick={() => handleSideChange('No')}>
                 NO
               </Button>
             </div>
@@ -187,56 +238,43 @@ export function PerpetualTradeCard({
               <input
                 className="mt-1 h-10 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => handleAmountChange(e.target.value)}
                 inputMode="decimal"
               />
             </label>
 
             <div className="rounded-lg bg-[var(--surface-2)] px-3 py-2.5 text-sm">
-              {payoutPreview ? (
+              {preview ? (
                 <>
-                  You get <span className="font-semibold">{payoutPreview} XLM</span> of {side.toUpperCase()}{' '}
+                  You get <span className="font-semibold">{preview.payout} XLM</span> of {side.toUpperCase()}{' '}
                   <span className="text-[var(--faint)]">(you stake {amount || '0'} XLM)</span>
                 </>
               ) : (
-                <span className="text-[var(--faint)]">Enter an amount to see your position size</span>
+                <span className="text-[var(--faint)]">Enter an amount to preview your payout.</span>
               )}
             </div>
 
+            {insufficientBalance && balance && (
+              <p className="text-xs text-[var(--danger)]">
+                Insufficient balance (you have {stroopsToXlm(balance)} XLM)
+              </p>
+            )}
+
             <Button
               className="w-full"
-              variant={side === 'Yes' ? 'yes' : 'no'}
               onClick={handleTrade}
-              disabled={busy || connecting || !state || !fee || !payoutPreview}
+              disabled={busy || connecting || insufficientBalance}
             >
-              {connecting
-                ? 'Confirm in Freighter…'
-                : busy
-                  ? wallet?.kind === 'email'
-                    ? 'Placing trade…'
-                    : 'Confirm in Freighter…'
-                  : `Buy ${side}`}
+              {busy ? 'Confirming…' : connecting ? 'Connecting…' : 'Buy'}
             </Button>
-            {!wallet && !connecting && (
-              <p className="text-center text-[11px] text-[var(--faint)]">
-                Connects Freighter &mdash; sign with your own wallet, no custodial account
+            {walletError && <p className="text-xs text-[var(--danger)]">{walletError}</p>}
+            {txError && <p className="text-xs text-[var(--danger)]">{txError}</p>}
+            {txResult && (
+              <p className="text-xs text-[var(--muted)]">
+                Confirmed: <span className="font-mono">{shortAddress(txResult)}</span>
               </p>
             )}
           </div>
-        )}
-
-        {pos && (
-          <div className="mt-4 border-t border-[var(--line)] pt-3 text-xs text-[var(--muted)]">
-            Your position: {stroopsToXlm(pos.yes)} YES / {stroopsToXlm(pos.no)} NO
-          </div>
-        )}
-        {txResult && (
-          <p className="mt-3 text-xs text-[var(--yes)]">
-            Confirmed <span className="text-[var(--faint)]">— ref {shortAddress(txResult)}</span>
-          </p>
-        )}
-        {(txError || walletError) && (
-          <p className="mt-3 text-xs text-[var(--no)] break-all">{txError ?? walletError}</p>
         )}
       </CardBody>
     </Card>

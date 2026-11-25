@@ -159,99 +159,33 @@ export interface OnChainMarket {
 }
 
 /**
- * `polaris-perpetual` — continuous trading, no strike/expiry/settle (see
- * `polaris-contracts/README.md`'s "The perpetual contract"). Deliberately
- * its own type, not `Partial<WatchedMarket>`/`Partial<OnChainMarket>`: a
- * perpetual genuinely has none of `strikePriceCents`/`expiry`/
- * `gracePeriodSecs`/`feedId`/`strikePrice`/`finalPrice`, so making those
- * optional-on-a-market-shape would misrepresent a structural difference as
- * a display nicety.
+ * Shared query options for live market data (price, pool state, fees, positions).
+ *
+ * These queries opt into `refetchOnWindowFocus` so that returning to the tab
+ * immediately refreshes stale reserves/odds instead of waiting for the next
+ * poll. React Query still respects `staleTime`, so a focus event only triggers
+ * a refetch when the cached data is actually stale — no refetch storm.
  */
-export interface WatchedPerpetual {
-  contractId: string;
-  status: 'watching' | 'terminated';
-  lastError?: string;
-  terminateTxHash?: string;
-  createdAt: number;
-  updatedAt: number;
-}
+export const liveMarketQueryOptions = {
+  refetchOnWindowFocus: true,
+} as const;
 
-export interface OnChainPerpetual {
-  admin: string;
-  collateral: string;
-  baseFeeBps: number;
-  minFeeBps: number;
-  treasury: string;
-  status: 'Open' | 'Terminated';
-  poolYes: string;
-  poolNo: string;
-  totalSupply: string;
-  initialLiquidity: string;
-  /** `0`/`"0"` until a `record_price_checkpoint` call has ever succeeded — purely informational, see the contract's own doc comment. No perpetual this backend deploys has an oracle configured yet, so this stays `"0"` in practice. */
-  lastPriceCents: string;
-  lastPriceAt: string;
-}
+/**
+ * Shared query options for admin and list queries, which should not refetch
+ * on window focus.
+ */
+export const staticQueryOptions = {
+  refetchOnWindowFocus: false,
+} as const;
 
-export interface AdminOverview {
-  totalMarkets: number;
-  marketsByStatus: Record<string, number>;
-  totalPerpetuals: number;
-  perpetualsByStatus: Record<string, number>;
-  vaultBalanceStroops: string | null;
-  totalWalletActions: number;
-  settlementChecksByOutcome: { ok: number; skipped: number; failed: number };
-}
-
-export interface AdminFeeRevenue {
-  totalStroops: string;
-  byMarket: { contractId: string; stroops: string }[];
-  sampleSize: number;
-}
-
-export interface VaultFlow {
-  id: number;
-  vault_contract_id: string;
-  amount_stroops: string;
-  market_contract_id: string;
-  tx_hash: string;
-  created_at: number;
-}
-
-export type AdminTreasury =
-  | { configured: false }
-  | {
-      configured: true;
-      vaultContract: string;
-      balanceStroops: string;
-      totalDepositedStroops: string;
-      recentWithdrawals: VaultFlow[];
-    };
-
-export interface AdminWallets {
-  passkeyAddressesSeen: string[];
-  emailWallets: { email: string; address: string; createdAt: number }[];
-}
-
-export interface AdminNetwork {
-  status: string;
-  latestLedger: number;
-  oldestLedger: number;
-  ledgerRetentionWindow: number;
-  oraclePublicKey: string;
-  deployerPublicKey: string;
-  contracts: Record<string, string | undefined>;
-  wasmHashes: Record<string, string | undefined>;
-}
-
-export interface SettlementCheck {
-  id: number;
-  market_contract_id: string;
-  lazer_price_cents: string | null;
-  hermes_price_cents: string | null;
-  divergence_bps: number | null;
-  outcome: 'ok' | 'skipped' | 'failed';
-  reason: string | null;
-  created_at: number;
+export function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        refetchOnWindowFocus: false,
+      },
+    },
+  });
 }
 
 export const api = {

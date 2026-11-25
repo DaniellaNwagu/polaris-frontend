@@ -25,6 +25,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Finance',
     items: [
       { href: '/admin/markets', label: 'Markets' },
+      { href: '/admin/create', label: 'Create Market' },
       { href: '/admin/perpetuals', label: 'Perpetuals' },
       { href: '/admin/fee-revenue', label: 'Fee Revenue' },
       { href: '/admin/treasury', label: 'Treasury' },
@@ -40,8 +41,12 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+const FOCUS_RING =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2';
+
 export function AdminSidebar() {
   const pathname = usePathname();
+  const { lock } = useAdminKey();
 
   return (
     <nav className="w-56 shrink-0 space-y-6 border-r border-[var(--line)] px-4 py-6">
@@ -61,8 +66,10 @@ export function AdminSidebar() {
                 <Link
                   key={item.href}
                   href={item.href}
+                  aria-current={active ? 'page' : undefined}
                   className={cn(
                     'block rounded-lg px-2 py-1.5 text-sm',
+                    FOCUS_RING,
                     active
                       ? 'bg-[var(--accent-soft)] font-semibold text-[var(--accent-ink)]'
                       : 'text-[var(--ink-soft)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]',
@@ -75,6 +82,18 @@ export function AdminSidebar() {
           </div>
         </div>
       ))}
+      <div className="border-t border-[var(--line)] pt-4">
+        <button
+          type="button"
+          onClick={lock}
+          className={cn(
+            'block w-full rounded-lg px-2 py-1.5 text-left text-sm text-[var(--ink-soft)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]',
+            FOCUS_RING,
+          )}
+        >
+          Lock dashboard
+        </button>
+      </div>
     </nav>
   );
 }

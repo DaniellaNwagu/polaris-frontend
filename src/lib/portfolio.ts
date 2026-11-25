@@ -20,6 +20,27 @@ export interface Position {
   no: bigint;
 }
 
+/** True when a position holds nothing on either side — such rows render nothing. */
+export function isEmptyPosition(position: Position): boolean {
+  return position.yes === 0n && position.no === 0n;
+}
+
+/**
+ * Given the full list of market ids and a map of already-fetched positions,
+ * return only the ids whose position is non-zero. Callers use this to fetch
+ * state/price only for rows that will actually render, so request count
+ * scales with positions held rather than total markets.
+ */
+export function heldMarketIds(
+  marketIds: readonly string[],
+  positions: ReadonlyMap<string, Position>,
+): string[] {
+  return marketIds.filter((id) => {
+    const position = positions.get(id);
+    return position !== undefined && !isEmptyPosition(position);
+  });
+}
+
 /** Mirrors `redeem()` exactly: what this position is worth in collateral right now. */
 export function redeemableValue(status: MarketStatus, position: Position): bigint {
   switch (status) {

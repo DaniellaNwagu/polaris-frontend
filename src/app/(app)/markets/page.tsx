@@ -125,34 +125,108 @@ export default function AllMarketsPage() {
   });
 
   return (
-    <div>
-      <h1 className="mb-1 text-2xl font-bold">All markets</h1>
-      <p className="mb-6 text-sm text-[var(--muted)]">
-        Every XLM/USD market, open or closed.
-      </p>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold">Markets</h1>
+        <p className="text-sm text-muted-foreground">
+          Browse open markets and place your predictions.
+        </p>
+      </div>
 
-      {isLoading && <p className="text-sm text-[var(--muted)]">Loading markets…</p>}
-      {error && <p className="text-sm text-[var(--no)]">Couldn&rsquo;t reach the backend: {(error as Error).message}</p>}
-      {markets && markets.length === 0 && (
-        <p className="text-sm text-[var(--muted)]">No markets yet — an admin can create one from /create.</p>
-      )}
+      {markets.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No open markets yet.</p>
+      ) : (
+        <div
+          role="table"
+          aria-label="Open markets"
+          className="divide-y rounded-lg border"
+        >
+          <div
+            role="row"
+            className="flex items-center gap-4 px-4 py-2 text-xs font-medium text-muted-foreground"
+          >
+            <span role="columnheader" className="flex-1">
+              Market
+            </span>
+            <span role="columnheader" className="w-16 shrink-0 text-right">
+              Yes
+            </span>
+            <span role="columnheader" className="w-16 shrink-0 text-right">
+              No
+            </span>
+            <span role="columnheader" className="w-16 shrink-0 text-right">
+              Chg
+            </span>
+            <span role="columnheader" className="w-20 shrink-0 text-right">
+              Status
+            </span>
+          </div>
+          {markets.map((market) => {
+            const yesPercent = Math.round(market.yesPrice * 100);
+            const noPercent = 100 - yesPercent;
+            const closesIn = timeUntil(market.closesAt);
+            const accessibleName = `${market.symbol} at or above ${formatCurrency(
+              market.threshold,
+            )} — Yes ${yesPercent}%, closes in ${closesIn}`;
 
-      {markets && markets.length > 0 && (
-        <Card className="overflow-hidden">
-          <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-x-3 border-b border-[var(--line)] px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--faint)] sm:gap-x-5 sm:px-5">
-            <span />
-            <span>Market</span>
-            <span className="text-right">Yes</span>
-            <span className="text-right">No</span>
-            <span className="text-right">Chg</span>
-            <span className="hidden text-right sm:block">Status</span>
-          </div>
-          <div className="divide-y divide-[var(--line)]">
-            {markets.map((m) => (
-              <MarketRow key={m.contractId} contractId={m.contractId} />
-            ))}
-          </div>
-        </Card>
+            return (
+              <div
+                key={market.id}
+                role="row"
+                className="flex items-center gap-4 px-4 py-3 hover:bg-muted/50"
+              >
+                <div role="cell" className="flex min-w-0 flex-1 items-center gap-4">
+                  <span
+                    aria-hidden="true"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold"
+                  >
+                    XL
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      href={`/markets/${market.id}`}
+                      aria-label={accessibleName}
+                      className="block truncate font-medium hover:underline"
+                    >
+                      {market.symbol} ≥ {formatCurrency(market.threshold)}
+                    </Link>
+                    <p className="text-xs text-muted-foreground">
+                      Closes in {closesIn} · {market._count.positions} positions
+                    </p>
+                  </div>
+                </div>
+                <span
+                  role="cell"
+                  className="w-16 shrink-0 text-right text-sm"
+                >
+                  <span className="rounded bg-green-100 px-2 py-0.5 text-green-800">
+                    {formatPercent(yesPercent)}
+                  </span>
+                </span>
+                <span
+                  role="cell"
+                  className="w-16 shrink-0 text-right text-sm"
+                >
+                  <span className="rounded bg-red-100 px-2 py-0.5 text-red-800">
+                    {formatPercent(noPercent)}
+                  </span>
+                </span>
+                <span
+                  role="cell"
+                  className="w-16 shrink-0 text-right text-sm text-muted-foreground"
+                >
+                  —
+                </span>
+                <span
+                  role="cell"
+                  className="w-20 shrink-0 text-right text-sm text-muted-foreground"
+                >
+                  {closesIn}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
