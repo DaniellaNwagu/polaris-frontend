@@ -33,6 +33,7 @@ This is one of three repos that make up Polaris:
 - [Testing](#testing)
 - [Deployment](#deployment)
 - [Design notes](#design-notes)
+- [Design reference](./DESIGN.md)
 - [Verified live: the real WebAuthn path](#verified-live-the-real-webauthn-path)
 - [Known gaps](#known-gaps)
 - [Contributing](#contributing)

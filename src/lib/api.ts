@@ -170,7 +170,6 @@ export type AdminTreasury =
     };
 
 export interface AdminWallets {
-  passkeyAddressesSeen: string[];
   emailWallets: { email: string; address: string; createdAt: number }[];
 }
 

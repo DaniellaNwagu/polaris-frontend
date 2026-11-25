@@ -7,7 +7,8 @@ import { useAdminKey } from '@/lib/admin-key-provider';
 import { Card, CardBody } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { centsToUsd, shortAddress } from '@/lib/format';
+import { Address } from '@/components/ui/address';
+import { centsToUsd } from '@/lib/format';
 
 /** Relocated from `(app)/admin/page.tsx` verbatim (minus the admin-key input, now handled once by `admin/layout.tsx`'s gate) as part of the dashboard rebuild — see the other `admin/*` pages for what's actually new. */
 export default function AdminMarketsPage() {
@@ -16,7 +17,7 @@ export default function AdminMarketsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: markets } = useQuery({ queryKey: ['markets'], queryFn: api.listMarkets });
+  const { data: markets, isLoading } = useQuery({ queryKey: ['markets'], queryFn: api.listMarkets });
 
   async function act(action: 'settle' | 'cancel', contractId: string) {
     setBusyId(contractId);
@@ -38,12 +39,14 @@ export default function AdminMarketsPage() {
 
       {error && <p className="mb-4 text-sm text-[var(--no)] break-all">{error}</p>}
 
+      {isLoading && <p className="text-sm text-[var(--muted)]">Loading…</p>}
+
       <div className="space-y-3">
         {markets?.map((m) => (
           <Card key={m.contractId}>
             <CardBody className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="font-mono text-xs text-[var(--faint)]">{shortAddress(m.contractId)}</div>
+                <Address value={m.contractId} />
                 <div className="text-sm font-semibold">≥ {centsToUsd(m.strikePriceCents)}</div>
                 {m.lastError && (
                   <div className="mt-1 text-xs text-[var(--no)] max-w-md break-all">{m.lastError}</div>

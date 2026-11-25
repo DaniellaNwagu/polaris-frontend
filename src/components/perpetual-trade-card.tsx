@@ -49,7 +49,7 @@ export function PerpetualTradeCard({
   const [txResult, setTxResult] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
 
-  const { data: perpetual } = useQuery({
+  const { data: perpetual, isLoading } = useQuery({
     queryKey: ['perpetual', perpetualId],
     queryFn: () => api.getPerpetual(perpetualId),
   });
@@ -73,23 +73,39 @@ export function PerpetualTradeCard({
     enabled: !!wallet,
   });
 
-  const payoutPreview = useMemo(() => {
+  // Computed once here and reused by both the preview and `handleTrade` so
+  // the displayed "minimum if price moves" is exactly the `min_shares_out`
+  // actually submitted.
+  const preview = useMemo(() => {
     if (!state || !fee) return null;
     try {
       const stroops = xlmToStroops(amount);
       if (stroops <= 0n) return null;
-      const bonus = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
-      return stroopsToXlm((stroops + bonus).toString());
+      const estimate = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
+      const minSharesOut = withSlippageTolerance(estimate, SLIPPAGE_TOLERANCE_BPS);
+      return {
+        payout: stroopsToXlm((stroops + estimate).toString()),
+        minSharesOut: stroopsToXlm(minSharesOut.toString()),
+      };
     } catch {
       return null;
     }
   }, [amount, side, state, fee]);
 
-  if (!perpetual) {
+  if (isLoading) {
     return (
       <Card className={className}>
         <CardBody className={bodyClassName}>
           <p className="text-sm text-[var(--muted)]">Loading…</p>
+        </CardBody>
+      </Card>
+    );
+  }
+  if (!perpetual) {
+    return (
+      <Card className={className}>
+        <CardBody className={bodyClassName}>
+          <p className="text-sm text-[var(--muted)]">Perpetual unavailable.</p>
         </CardBody>
       </Card>
     );
@@ -208,9 +224,9 @@ export function PerpetualTradeCard({
             </label>
 
             <div className="rounded-lg bg-[var(--surface-2)] px-3 py-2.5 text-sm">
-              {payoutPreview ? (
+              {preview ? (
                 <>
-                  You get <span className="font-semibold">{payoutPreview} XLM</span> of {side.toUpperCase()}{' '}
+                  You get <span className="font-semibold">{preview.payout} XLM</span> of {side.toUpperCase()}{' '}
                   <span className="text-[var(--faint)]">(you stake {amount || '0'} XLM)</span>
 
 /* … truncated 896 chars — edit only what you need near the top … */

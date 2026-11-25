@@ -6,14 +6,23 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-[var(--accent)] text-[var(--accent-foreground)] hover:opacity-90",
+          "bg-[var(--accent)] text-white hover:opacity-90",
+        primary:
+          "bg-[var(--accent)] text-white hover:opacity-90",
+        secondary:
+          "border border-[var(--line)] bg-[var(--surface)] text-[var(--ink)] hover:bg-[var(--surface-2)]",
         outline:
-          "border border-[var(--border)] bg-transparent hover:bg-[var(--muted)]",
-        ghost: "bg-transparent hover:bg-[var(--muted)]",
+          "border border-[var(--line)] bg-transparent text-[var(--ink)] hover:bg-[var(--surface-2)]",
+        ghost: "bg-transparent text-[var(--ink)] hover:bg-[var(--surface-2)]",
+        yes:
+          "bg-[var(--yes)] text-white hover:opacity-90",
+        no:
+          "bg-[var(--no)] text-white hover:opacity-90",
         destructive:
-          "bg-[var(--destructive)] text-[var(--destructive-foreground)] hover:opacity-90",
+          "bg-[var(--no)] text-white hover:opacity-90",
       },
       size: {
+        default: 'h-10 px-4 text-sm',
         sm: 'h-8 px-3 text-sm',
         md: 'h-10 px-4 text-sm',
         lg: 'h-12 px-6 text-base',
@@ -22,8 +31,8 @@ export const buttonVariants = cva(
       },
     },
     defaultVariants: {
-      variant: "default",
-      size: "default",
+      variant: "primary",
+      size: "md",
     },
   }
 );
