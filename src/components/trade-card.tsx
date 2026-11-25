@@ -62,7 +62,9 @@ export function TradeCard({
    * redeem succeeds but the buy then fails (slippage, pool depth, this
    * market already closed), the user simply holds the redeemed collateral
    * in their own wallet — not a fund-safety issue, the same recoverable
-   * failure shape `txError` already surfaces for any other failed buy.
+   * failure shape `txError` already surfaces for any other failed buy. The
+   * error message explicitly states the redeemed amount so the user doesn't
+   * think nothing happened and try to redeem again.
    */
   rolloverFromMarketId?: string;
 }) {
@@ -75,6 +77,27 @@ export function TradeCard({
   const [txResult, setTxResult] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
   const [txCancelled, setTxCancelled] = useState(false);
+
+  // Measures the card's rendered height and publishes it as a CSS variable
+  // (`--trade-card-height`) on the document root. The detail pages use it to
+  // pad their scroll container so the fixed mobile bottom sheet never covers
+  // the last of the market details — a fixed `pb-56` breaks as soon as the
+  // card grows (error, rollover note, result reveal, email form).
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const root = document.documentElement;
+    const observer = new ResizeObserver((entries) => {
+      const height = entries[0]?.contentRect.height ?? el.offsetHeight;
+      root.style.setProperty('--trade-card-height', `${Math.ceil(height)}px`);
+    });
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty('--trade-card-height');
+    };
+  }, []);
 
   const { data: market } = useQuery({
     queryKey: ['market', marketId],
@@ -100,21 +123,50 @@ export function TradeCard({
     queryFn: () => api.getPosition(marketId, wallet!.address),
     enabled: !!wallet,
   });
+  // Shared with auth-controls.tsx — same key, so React Query dedupes and this
+  // costs nothing extra when the header already fetched it. Used to preflight
+  // the buy amount so an over-balance trade never opens a signing prompt.
+  const { data: walletBalance } = useQuery({
+    queryKey: ['walletBalance', wallet?.address],
+    queryFn: () => api.getBalance(wallet!.address),
+    enabled: !!wallet,
+  });
   const nextRound = useNextRound(market);
 
-  const { data: rolloverState } = useQuery({
-    queryKey: ['state', rolloverFromMarketId],
-    queryFn: () => api.getMarketState(rolloverFromMarketId!),
+  // `rolloverFromMarketId` comes straight from a URL query param, so it is
+  // attacker-controlled: anyone can share `/market/<real>?rolloverFrom=<any
+  // contract id>`. Only honor it when it names a market the backend actually
+  // tracks, on the same feed as this one, already terminal, and created
+  // before this market — the exact relationship `useNextRound` defines. An
+  // unknown/unrelated id must never reach `callAsWallet`'s redeem path.
+  const { data: rolloverMarket } = useQuery({
+    queryKey: ['market', rolloverFromMarketId],
+    queryFn: () => api.getMarket(rolloverFromMarketId!),
     enabled: !!rolloverFromMarketId,
+    retry: false,
+  });
+  const rolloverValid =
+    !!rolloverMarket &&
+    !!market &&
+    rolloverMarket.id !== market.id &&
+    rolloverMarket.feedId === market.feedId &&
+    rolloverMarket.status !== 'watching' &&
+    rolloverMarket.createdAt < market.createdAt;
+  const validatedRolloverId = rolloverValid ? rolloverFromMarketId : undefined;
+
+  const { data: rolloverState } = useQuery({
+    queryKey: ['state', validatedRolloverId],
+    queryFn: () => api.getMarketState(validatedRolloverId!),
+    enabled: !!validatedRolloverId,
   });
   const { data: rolloverPosition } = useQuery({
-    queryKey: ['position', rolloverFromMarketId, wallet?.address],
-    queryFn: () => api.getPosition(rolloverFromMarketId!, wallet!.address),
-    enabled: !!rolloverFromMarketId && !!wallet,
+    queryKey: ['position', validatedRolloverId, wallet?.address],
+    queryFn: () => api.getPosition(validatedRolloverId!, wallet!.address),
+    enabled: !!validatedRolloverId && !!wallet,
   });
   const rolloverStatus = (rolloverState?.status ?? null) as MarketStatus | null;
   const rolloverAmount =
-    rolloverStatus && rolloverStatus !== 'Open' && rolloverPosition
+    validatedRolloverId && rolloverStatus && rolloverStatus !== 'Open' && rolloverPosition
       ? redeemableValue(rolloverStatus, { yes: BigInt(rolloverPosition.yes), no: BigInt(rolloverPosition.no) })
       : 0n;
 
@@ -162,17 +214,47 @@ export function TradeCard({
       const stroops = xlmToStroops(amount);
       if (stroops <= 0n) return null;
       const bonus = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
-      return stroopsToXlm((stroops + bonus).toString());
+      const estimate = stroops + bonus;
+      const minSharesOut = withSlippageTolerance(estimate, SLIPPAGE_TOLERANCE_BPS);
+      return {
+        payout: stroopsToXlm(estimate.toString()),
+        minSharesOut,
+        minReceived: stroopsToXlm(minSharesOut.toString()),
+      };
     } catch {
       return null;
     }
   }, [amount, side, state, fee]);
 
+  // Client-side preflight: if the entered amount exceeds the wallet balance
+  // (minus a small reserve for Freighter's own network fee), disable Buy and
+  // show the available balance instead of letting the user sign a tx that
+  // will only fail at the contract/RPC layer.
+  const balanceStroops = walletBalance != null ? BigInt(walletBalance) : null;
+  const amountStroops = useMemo(() => {
+    try {
+      return xlmToStroops(amount);
+    } catch {
+      return 0n;
+    }
+  }, [amount]);
+  const insufficientBalance =
+    balanceStroops != null && amountStroops > 0n && amountStroops > balanceStroops;
+
+  if (!market) {
+    return (
+      <Card ref={cardRef} className={className}>
+        <CardBody className={bodyClassName}>
+          <p className="text-sm text-[var(--muted)]">Loading…</p>
+        </CardBody>
+      </Card>
+    );
+  }
   if (!market) {
     return (
       <Card className={className}>
         <CardBody className={bodyClassName}>
-          <p className="text-sm text-[var(--muted)]">Loading…</p>
+          <p className="text-sm text-[var(--muted)]">Market unavailable.</p>
         </CardBody>
       </Card>
     );
@@ -182,6 +264,8 @@ export function TradeCard({
 
   async function handleTrade() {
     if (!state || !fee) return;
+    // Never open a signing prompt for an amount the wallet can't cover.
+    if (insufficientBalance) return;
     setTxError(null);
     setTxResult(null);
     setTxCancelled(false);

@@ -6,6 +6,8 @@ import { useWallet } from '@/lib/wallet-provider';
 import { api } from '@/lib/api';
 import { Card, CardBody } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { AuthControls } from '@/components/auth-controls';
 import { centsToUsd, stroopsToXlm } from '@/lib/format';
 import { didWin, markToMarket, redeemableValue, type MarketStatus } from '@/lib/portfolio';
 
@@ -157,12 +159,22 @@ function PerpetualPositionRow({ contractId }: { contractId: string }) {
 }
 
 export default function PortfolioPage() {
-  const { wallet } = useWallet();
+  const { wallet, connectWallet } = useWallet();
   const { data: markets } = useQuery({ queryKey: ['markets'], queryFn: api.listMarkets });
   const { data: perpetuals } = useQuery({ queryKey: ['perpetuals'], queryFn: api.listPerpetuals });
 
   if (!wallet) {
-    return <p className="text-sm text-[var(--muted)]">Connect your wallet to see your positions.</p>;
+    return (
+      <div>
+        <h1 className="mb-1 text-2xl font-bold">Portfolio</h1>
+        <p className="mb-4 text-sm text-[var(--muted)]">Connect your wallet to see your positions.</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button onClick={() => connectWallet()}>Connect Wallet</Button>
+          <span className="text-sm text-[var(--muted)]">or use email</span>
+          <AuthControls />
+        </div>
+      </div>
+    );
   }
 
   return (

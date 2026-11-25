@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/cn';
+import { useAdminKey } from '@/lib/admin-key-provider';
 
 interface NavItem {
   href: string;
@@ -45,6 +46,7 @@ const FOCUS_RING =
 
 export function AdminSidebar() {
   const pathname = usePathname();
+  const { lock } = useAdminKey();
 
   return (
     <nav className="w-56 shrink-0 space-y-6 border-r border-[var(--line)] px-4 py-6">
@@ -89,6 +91,18 @@ export function AdminSidebar() {
           </div>
         </div>
       ))}
+      <div className="border-t border-[var(--line)] pt-4">
+        <button
+          type="button"
+          onClick={lock}
+          className={cn(
+            'block w-full rounded-lg px-2 py-1.5 text-left text-sm text-[var(--ink-soft)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]',
+            FOCUS_RING,
+          )}
+        >
+          Lock dashboard
+        </button>
+      </div>
     </nav>
   );
 }

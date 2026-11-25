@@ -1,6 +1,6 @@
 'use client';
 
-import { use } from 'react';
+import { use, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Card, CardBody } from '@/components/ui/card';
@@ -11,38 +11,66 @@ import { stroopsToXlm, statusLabel, centsToUsd } from '@/lib/format';
 
 export default function PerpetualDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const sheetRef = useRef<HTMLDivElement>(null);
 
-  const { data: perpetual } = useQuery({
+  const { data: perpetual, isLoading } = useQuery({
     queryKey: ['perpetual', id],
     queryFn: () => api.getPerpetual(id),
+    refetchOnWindowFocus: true,
   });
   const { data: price } = useQuery({
     queryKey: ['perpetualPrice', id],
     queryFn: () => api.getPerpetualPrice(id),
     refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
     enabled: perpetual?.status === 'watching',
   });
   const { data: state } = useQuery({
     queryKey: ['perpetualState', id],
     queryFn: () => api.getPerpetualState(id),
     refetchInterval: perpetual?.status === 'watching' ? 15_000 : false,
+    refetchOnWindowFocus: true,
   });
   const { data: fee } = useQuery({
     queryKey: ['perpetualFee', id],
     queryFn: () => api.getPerpetualFee(id),
     enabled: perpetual?.status === 'watching',
     refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   });
+
+  // Measure the fixed bottom trade sheet so page padding tracks its real height
+  // instead of a hardcoded pb-56 (which hides content when the sheet grows).
+  useEffect(() => {
+    const el = sheetRef.current;
+    if (!el) return;
+    const update = () => {
+      document.documentElement.style.setProperty('--trade-sheet-height', `${el.offsetHeight}px`);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty('--trade-sheet-height');
+    };
+  }, []);
 
   if (!perpetual) {
     return <p className="text-sm text-[var(--muted)]">Loading…</p>;
+  }
+  if (!perpetual) {
+    return <p className="text-sm text-[var(--muted)]">Perpetual unavailable.</p>;
   }
 
   const isOpen = perpetual.status === 'watching';
   const hasCheckpoint = !!state && state.lastPriceAt !== '0';
 
   return (
-    <div className="grid grid-cols-1 gap-6 pb-56 lg:grid-cols-3 lg:pb-0">
+    <div
+      className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:pb-0"
+      style={{ paddingBottom: 'calc(var(--trade-sheet-height, 14rem) + 1rem)' }}
+    >
       <div className="lg:col-span-2">
         <div className="mb-4 flex items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-[var(--faint)]">XLM/USD</span>
@@ -97,6 +125,7 @@ export default function PerpetualDetailPage({ params }: { params: Promise<{ id: 
       </div>
 
       <div
+        ref={sheetRef}
         className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--line)] bg-[var(--bg)] px-4 pt-3 shadow-[0_-8px_24px_rgba(0,0,0,0.12)] lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none"
         style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
       >

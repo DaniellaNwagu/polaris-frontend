@@ -48,6 +48,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   const { id } = use(params);
   const { wallet, connecting, error: walletError, freighterAvailable, connectWallet } = useWallet();
   const queryClient = useQueryClient();
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const [side, setSide] = useState<'Yes' | 'No'>('Yes');
   const [amount, setAmount] = useState('10');
@@ -59,6 +60,29 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   // whenever this browser/webview has no Freighter extension at all.
   const [preferEmail, setPreferEmail] = useState(false);
   const showEmailFallback = !wallet && (preferEmail || freighterAvailable === false);
+  // Set when the email flow "succeeds" but the session cookie can't be used
+  // from inside this iframe (third-party cookies blocked/partitioned). We
+  // must not show a signed-in state that can't trade — instead point the
+  // user at the main app in a new tab.
+  const [emailSessionBlocked, setEmailSessionBlocked] = useState(false);
+  const openInPolarisHref =
+    typeof window !== 'undefined' ? `${window.location.origin}/market/${id}` : '#';
+
+  // Report the widget's content height to the host page so it can size the
+  // iframe to fit — otherwise taller states (email fallback, ResultReveal,
+  // multi-line errors) clip or scroll and shorter ones leave dead space.
+  // Payload is intentionally just { type, height } — no wallet/position data.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof window === 'undefined' || window.parent === window) return;
+    const post = () => {
+      window.parent.postMessage({ type: 'polaris:resize', height: el.scrollHeight }, '*');
+    };
+    post();
+    const observer = new ResizeObserver(post);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const { data: market } = useQuery({
     queryKey: ['market', id],
@@ -131,8 +155,31 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   }, [amount, side, state, fee]);
 
   if (!market) {
+    if (marketPending) {
+      return (
+        <div className="p-4 text-center text-sm text-[var(--muted)]">Loading…</div>
+      );
+    }
+    if (marketError) {
+      const status = (marketError as { status?: number }).status;
+      if (status === 404) {
+        return (
+          <div className="p-4 text-center text-sm text-[var(--muted)]">
+            This market doesn&rsquo;t exist (check the embed code)
+          </div>
+        );
+      }
+      return (
+        <div className="space-y-2 p-4 text-center">
+          <p className="text-sm text-[var(--muted)]">Couldn&rsquo;t load this market.</p>
+          <Button size="sm" variant="outline" onClick={() => void refetchMarket()}>
+            Retry
+          </Button>
+        </div>
+      );
+    }
     return (
-      <div className="p-4 text-sm text-[var(--muted)]">Loading…</div>
+      <div ref={rootRef} className="p-4 text-sm text-[var(--muted)]">Loading…</div>
     );
   }
 
@@ -178,7 +225,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   }
 
   return (
-    <div className="p-3">
+    <div ref={rootRef} className="p-3">
       <Card>
         <CardBody className="space-y-3 p-4">
           <div className="flex items-center justify-between">
@@ -220,8 +267,28 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
             ) : (
               <p className="text-xs text-[var(--muted)]">Trading closed.</p>
             )
+          ) : emailSessionBlocked ? (
+            <div className="space-y-2 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3">
+              <p className="text-xs text-[var(--muted)]">
+                Your browser blocked the sign-in session inside this embed. Open Polaris to
+                sign in with email and trade.
+              </p>
+              <a
+                href={openInPolarisHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-11 min-h-11 w-full items-center justify-center rounded-lg bg-[var(--accent-ink)] px-3 text-xs font-semibold text-white"
+              >
+                Open in Polaris to sign in with email
+              </a>
+            </div>
           ) : showEmailFallback ? (
-            <AuthControls compact autoFocus={false} />
+            <AuthControls
+              compact
+              autoFocus={false}
+              embed
+              onEmailSessionUnusable={() => setEmailSessionBlocked(true)}
+            />
           ) : (
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">

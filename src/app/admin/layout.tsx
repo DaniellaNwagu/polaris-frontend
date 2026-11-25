@@ -20,7 +20,7 @@ function AdminGate({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-screen">
         <a
           href="#main"
-          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-[var(--bg)] focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-[var(--fg)] focus:shadow focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-[var(--bg)] focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-[var(--ink)] focus:shadow focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
         >
           Skip to content
         </a>
