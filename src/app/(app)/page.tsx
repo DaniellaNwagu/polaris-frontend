@@ -10,6 +10,7 @@ import { OddsBar } from '@/components/odds-bar';
 import { TradeCard } from '@/components/trade-card';
 import { centsToUsd, formatCountdown, statusLabel } from '@/lib/format';
 import { rankMarkets } from '@/lib/rank-markets';
+import { qk } from '@/lib/query-keys';
 
 /**
  * The primary landing experience: one open market, featured full-width,
@@ -19,7 +20,11 @@ import { rankMarkets } from '@/lib/rank-markets';
  * here, not deleted.
  */
 export default function HomePage() {
-  const { data: markets, isLoading, error } = useQuery({
+  const {
+    data: markets,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ['markets'],
     queryFn: api.listMarkets,
     refetchInterval: 30_000,
@@ -30,8 +35,15 @@ export default function HomePage() {
   const featured = ranked.length > 0 ? ranked[featuredIndex % ranked.length] : null;
 
   const { data: price } = useQuery({
-    queryKey: ['price', featured?.contractId],
+    queryKey: qk.market.price(featured?.contractId),
     queryFn: () => api.getPrice(featured!.contractId),
+    enabled: !!featured,
+    refetchInterval: 15_000,
+  });
+
+  const { data: ticker } = useQuery({
+    queryKey: ['ticker', featured?.contractId],
+    queryFn: () => api.getTickerPrice(featured!.contractId),
     enabled: !!featured,
     refetchInterval: 15_000,
   });
@@ -40,7 +52,9 @@ export default function HomePage() {
     return <p className="text-sm text-[var(--muted)]">Loading markets…</p>;
   }
   if (error) {
-    return <p className="text-sm text-[var(--no)]">Couldn&rsquo;t reach the backend: {(error as Error).message}</p>;
+    return (
+      <p className="text-sm text-[var(--no)]">Couldn&rsquo;t reach the backend: {(error as Error).message}</p>
+    );
   }
   if (!featured) {
     return (
@@ -55,6 +69,10 @@ export default function HomePage() {
       </div>
     );
   }
+
+  const strikeUsd = featured.strikePriceCents / 100;
+  const distancePct =
+    ticker && strikeUsd > 0 ? ((ticker.price - strikeUsd) / strikeUsd) * 100 : null;
 
   return (
     <div>
@@ -79,6 +97,23 @@ export default function HomePage() {
           <h1 className="mb-4 text-3xl font-bold text-balance">
             Will XLM be ≥ {centsToUsd(featured.strikePriceCents)} by expiry?
           </h1>
+
+          <p className="mb-4 text-sm text-[var(--muted)]">
+            {ticker ? (
+              <>
+                XLM now: ${ticker.price.toFixed(4)}
+                {distancePct !== null && (
+                  <span className={distancePct >= 0 ? 'text-[var(--yes)]' : 'text-[var(--no)]'}>
+                    {' '}
+                    ({distancePct >= 0 ? '▲' : '▼'} {Math.abs(distancePct).toFixed(1)}%{' '}
+                    {distancePct >= 0 ? 'above' : 'below'} strike)
+                  </span>
+                )}
+              </>
+            ) : (
+              <>XLM now: —</>
+            )}
+          </p>
 
           {price && (
             <Card className="mb-4">

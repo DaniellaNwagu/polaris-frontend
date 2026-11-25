@@ -1,7 +1,12 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { connectFreighter, getConnectedAddress, isFreighterAvailable, type StoredWallet } from './freighter-wallet';
+import {
+  connectFreighter,
+  getConnectedAddress,
+  isFreighterAvailable,
+  type StoredWallet,
+} from './freighter-wallet';
 import { api, messageFromApiError } from './api';
 
 interface WalletContextValue {
@@ -20,10 +25,40 @@ interface WalletContextValue {
   verifyEmailCode: (email: string, code: string) => Promise<StoredWallet | null>;
   resetEmailFlow: () => void;
 
-  logout: () => void;
+  /**
+   * Signs out. For Freighter this is local-only (the extension has no
+   * programmatic revoke) but persists a "signed out" flag so a reload
+   * doesn't silently restore the wallet. For email wallets this awaits
+   * the backend logout — it only reports success once the session cookie
+   * is actually dead, and leaves the user signed in with a retryable
+   * error if that call fails.
+   */
+  logout: () => Promise<void>;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
+
+/** localStorage key for the "user explicitly signed out" flag (#112). */
+const SIGNED_OUT_KEY = 'polaris.signedOut';
+
+function isSignedOut(): boolean {
+  try {
+    return window.localStorage.getItem(SIGNED_OUT_KEY) === '1';
+  } catch {
+    // Storage unavailable (private mode, etc.) — fail open to the old
+    // behavior rather than breaking sign-in entirely.
+    return false;
+  }
+}
+
+function setSignedOutFlag(value: boolean) {
+  try {
+    if (value) window.localStorage.setItem(SIGNED_OUT_KEY, '1');
+    else window.localStorage.removeItem(SIGNED_OUT_KEY);
+  } catch {
+    // Ignore — see isSignedOut().
+  }
+}
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [wallet, setWallet] = useState<StoredWallet | null>(null);
@@ -44,6 +79,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     isFreighterAvailable().then((available) => {
       setFreighterAvailable(available);
     });
+
+    // If the user explicitly signed out, don't silently restore anything —
+    // not the Freighter authorization, not the email session — until they
+    // click Connect again. Otherwise "Sign out" would be undone by the
+    // next reload (#112).
+    if (isSignedOut()) return;
 
     // Freighter first (silent — no prompt, just asks the extension whether
     // this origin is already authorized), then fall back to an existing
@@ -69,6 +110,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     try {
       const address = await connectFreighter();
+      // Explicit connect overrides a previous sign-out (#112).
+      setSignedOutFlag(false);
       const w: StoredWallet = { kind: 'freighter', address };
       setWallet(w);
       return w;
@@ -100,6 +143,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     try {
       const { address } = await api.verifyEmailCode(email, code);
+      // Explicit connect overrides a previous sign-out (#112).
+      setSignedOutFlag(false);
       const w: StoredWallet = { kind: 'email', address };
       setWallet(w);
       setEmailStep('idle');
@@ -117,16 +162,31 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setError(null);
   }, []);
 
-  const logout = useCallback(() => {
-    // Freighter has no programmatic "revoke" call — forgetting the address
-    // client-side is the only disconnect this app can do; the extension
-    // itself still remembers it authorized this origin until the user
-    // revokes that from Freighter's own UI.
-    void api.emailLogout().catch(() => {});
+  const logout = useCallback(async () => {
+    setError(null);
+
+    if (wallet?.kind === 'email') {
+      // The session lives in an httpOnly cookie, so a failed logout leaves
+      // the account fully usable on the next page load. Only report success
+      // once the backend confirms the cookie is dead (#113).
+      try {
+        await api.emailLogout();
+      } catch {
+        setError("Couldn't sign out — try again");
+        return;
+      }
+    } else {
+      // Freighter has no programmatic "revoke" call — forgetting the address
+      // client-side is the only disconnect this app can do; the extension
+      // itself still remembers it authorized this origin until the user
+      // revokes that from Freighter's own UI. Persist a "signed out" flag so
+      // the silent restore on mount doesn't sign the user back in (#112).
+      setSignedOutFlag(true);
+    }
+
     setWallet(null);
     setEmailStep('idle');
-    setError(null);
-  }, []);
+  }, [wallet]);
 
   return (
     <WalletContext.Provider
