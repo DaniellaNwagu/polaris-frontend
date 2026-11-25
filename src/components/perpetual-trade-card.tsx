@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { stroopsToXlm, xlmToStroops, shortAddress } from '@/lib/format';
 import { redeemableValue } from '@/lib/portfolio';
 import { estimateBuyOut, withSlippageTolerance } from '@/lib/amm';
+import { explorerTxUrl } from '@/lib/explorer';
 
 /** Same floor as `TradeCard` — see its doc comment. */
 const SLIPPAGE_TOLERANCE_BPS = 200;
@@ -163,6 +164,18 @@ export function PerpetualTradeCard({
     }
   }
 
+  function handleSideChange(next: 'Yes' | 'No') {
+    setSide(next);
+    setTxResult(null);
+    setTxError(null);
+  }
+
+  function handleAmountChange(next: string) {
+    setAmount(next);
+    setTxResult(null);
+    setTxError(null);
+  }
+
   const pos = position ? { yes: BigInt(position.yes), no: BigInt(position.no) } : null;
   // `Terminated`'s payout is the exact same 0.5-collateral-per-complementary-pair
   // formula as a classic market's `Cancelled` — same reused math (see
@@ -193,10 +206,10 @@ export function PerpetualTradeCard({
         ) : (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
-              <Button variant={side === 'Yes' ? 'yes' : 'outline'} onClick={() => setSide('Yes')}>
+              <Button variant={side === 'Yes' ? 'yes' : 'outline'} onClick={() => handleSideChange('Yes')}>
                 YES
               </Button>
-              <Button variant={side === 'No' ? 'no' : 'outline'} onClick={() => setSide('No')}>
+              <Button variant={side === 'No' ? 'no' : 'outline'} onClick={() => handleSideChange('No')}>
                 NO
               </Button>
             </div>
@@ -205,7 +218,7 @@ export function PerpetualTradeCard({
               <input
                 className="mt-1 h-10 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => handleAmountChange(e.target.value)}
                 inputMode="decimal"
               />
             </label>
@@ -215,29 +228,5 @@ export function PerpetualTradeCard({
                 <>
                   You get <span className="font-semibold">{preview.payout} XLM</span> of {side.toUpperCase()}{' '}
                   <span className="text-[var(--faint)]">(you stake {amount || '0'} XLM)</span>
-                  <p className="mt-1 text-xs text-[var(--muted)]">
-                    Minimum if price moves: {preview.minSharesOut} XLM ({SLIPPAGE_TOLERANCE_BPS / 100}% tolerance)
-                  </p>
-                </>
-              ) : (
-                <span className="text-[var(--muted)]">Enter an amount to see your payout.</span>
-              )}
-            </div>
 
-            {txError && <p className="text-sm text-[var(--no)]">{txError}</p>}
-            {txResult && (
-              <p className="text-sm text-[var(--yes)]">
-                Trade submitted: <span className="font-mono">{shortAddress(txResult)}</span>
-              </p>
-            )}
-            {walletError && <p className="text-sm text-[var(--no)]">{walletError}</p>}
-
-            <Button className="w-full" onClick={handleTrade} disabled={busy || connecting || !preview}>
-              {busy ? 'Submitting…' : connecting ? 'Connecting…' : wallet ? `Buy ${side.toUpperCase()}` : 'Connect wallet'}
-            </Button>
-          </div>
-        )}
-      </CardBody>
-    </Card>
-  );
-}
+/* … truncated 896 chars — edit only what you need near the top … */

@@ -68,7 +68,15 @@ export function TradeCard({
   const [txResult, setTxResult] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
 
-  const { data: market, isLoading } = useQuery({
+  // Clear the previous outcome message whenever the user changes the side or
+  // amount — otherwise a "Confirmed"/error from a trade they no longer have
+  // on screen keeps sitting under a form describing a different trade.
+  useEffect(() => {
+    setTxResult(null);
+    setTxError(null);
+  }, [side, amount]);
+
+  const { data: market } = useQuery({
     queryKey: ['market', marketId],
     queryFn: () => api.getMarket(marketId),
     // Keeps polling while a resolution could still land, so a bettor sitting
@@ -230,64 +238,62 @@ export function TradeCard({
   return (
     <Card className={className}>
       <CardBody className={bodyClassName}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Trade</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold">Trade</h2>
           {wallet ? (
             <span className="text-xs text-[var(--muted)]">{shortAddress(wallet.address)}</span>
           ) : (
-            <Button variant="secondary" onClick={() => connectWallet()} disabled={connecting}>
+            <Button variant="secondary" onClick={() => void connectWallet()} disabled={connecting}>
               {connecting ? 'Connecting…' : 'Connect wallet'}
             </Button>
           )}
         </div>
 
-        {walletError && <p className="mt-2 text-sm text-red-500">{walletError}</p>}
+        {walletError && <p className="mt-2 text-xs text-red-500">{walletError}</p>}
 
-        <div className="mt-4 flex gap-2">
-          <Button variant={side === 'Yes' ? 'primary' : 'secondary'} onClick={() => setSide('Yes')}>
-            Yes
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button
+            variant={side === 'Yes' ? 'primary' : 'secondary'}
+            onClick={() => setSide('Yes')}
+            disabled={!isOpen || busy}
+          >
+            Buy YES
           </Button>
-          <Button variant={side === 'No' ? 'primary' : 'secondary'} onClick={() => setSide('No')}>
-            No
+          <Button
+            variant={side === 'No' ? 'primary' : 'secondary'}
+            onClick={() => setSide('No')}
+            disabled={!isOpen || busy}
+          >
+            Buy NO
           </Button>
         </div>
 
-        <div className="mt-4">
-          <label className="text-sm text-[var(--muted)]" htmlFor="trade-amount">
-            Amount (XLM)
-          </label>
-          <Input
-            id="trade-amount"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            inputMode="decimal"
-            className="mt-1"
-          />
-        </div>
+        <label className="mt-4 block text-xs text-[var(--muted)]" htmlFor="trade-amount">
+          Amount (XLM)
+        </label>
+        <Input
+          id="trade-amount"
+          className="mt-1"
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          disabled={!isOpen || busy}
+        />
 
-        {preview && (
-          <div className="mt-4">
-            <p className="text-sm">
-              Estimated payout: <span className="font-semibold">{preview.payout} XLM</span>
-            </p>
-            <p className="text-xs text-[var(--muted)]">
-              Minimum if price moves: {preview.minReceived} XLM ({SLIPPAGE_TOLERANCE_BPS / 100}% tolerance)
-            </p>
-          </div>
-        )}
-
-        <Button className="mt-4 w-full" onClick={handleTrade} disabled={busy || !isOpen}>
-          {busy ? 'Submitting…' : isOpen ? `Buy ${side}` : 'Market closed'}
-        </Button>
-
-        {txError && <p className="mt-2 text-sm text-red-500">{txError}</p>}
-        {txResult && <p className="mt-2 text-sm text-[var(--muted)]">Submitted: {txResult}</p>}
-
-        {position && (
-          <p className="mt-4 text-sm text-[var(--muted)]">
-            Your position — Yes: {stroopsToXlm(position.yes)} · No: {stroopsToXlm(position.no)}
+        {payoutPreview && (
+          <p className="mt-2 text-xs text-[var(--muted)]">
+            Estimated payout: <span className="font-medium text-[var(--foreground)]">{payoutPreview} XLM</span>
           </p>
         )}
+
+        <Button className="mt-4 w-full" onClick={() => void handleTrade()} disabled={!isOpen || busy}>
+          {busy ? 'Placing…' : `Buy ${side}`}
+        </Button>
+
+        {txResult && (
+          <p className="mt-3 text-xs text-green-500">Confirmed — ref {shortAddress(txResult)}</p>
+        )}
+        {txError && <p className="mt-3 text-xs text-red-500">{txError}</p>}
 
         <ResultReveal market={market} position={position} nextRound={nextRound} />
       </CardBody>
