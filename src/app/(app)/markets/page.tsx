@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { centsToUsd, formatCountdown, statusLabel } from '@/lib/format';
+import { qk } from '@/lib/query-keys';
 
 function statusTone(status: string): 'yes' | 'no' | 'warn' | 'neutral' {
   if (status === 'settled') return 'yes';
@@ -47,11 +48,11 @@ function ChgCell({ yesBpsChange }: { yesBpsChange: number | null | undefined }) 
  */
 function MarketRow({ contractId }: { contractId: string }) {
   const { data: market } = useQuery({
-    queryKey: ['market', contractId],
+    queryKey: qk.market.detail(contractId),
     queryFn: () => api.getMarket(contractId),
   });
   const { data: price } = useQuery({
-    queryKey: ['price', contractId],
+    queryKey: qk.market.price(contractId),
     queryFn: () => api.getPrice(contractId),
     enabled: market?.status === 'watching',
     refetchInterval: 15_000,
@@ -70,7 +71,7 @@ function MarketRow({ contractId }: { contractId: string }) {
     >
       <span
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-        style={{ background: isOpen ? 'linear-gradient(135deg, #5b4fe0, #8b7bff)' : 'var(--faint)' }}
+        style={{ background: isOpen ? 'var(--brand-gradient)' : 'var(--faint)' }}
       >
         XL
       </span>
@@ -162,7 +163,72 @@ export default function AllMarketsPage() {
               <MarketRow key={m.contractId} contractId={m.contractId} />
             ))}
           </div>
-        </Card>
+          {markets.map((market) => {
+            const yesPercent = Math.round(market.yesPrice * 100);
+            const noPercent = 100 - yesPercent;
+            const closesIn = timeUntil(market.closesAt);
+            const accessibleName = `${market.symbol} at or above ${formatCurrency(
+              market.threshold,
+            )} — Yes ${yesPercent}%, closes in ${closesIn}`;
+
+            return (
+              <div
+                key={market.id}
+                role="row"
+                className="flex items-center gap-4 px-4 py-3 hover:bg-muted/50"
+              >
+                <div role="cell" className="flex min-w-0 flex-1 items-center gap-4">
+                  <span
+                    aria-hidden="true"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold"
+                  >
+                    XL
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      href={`/markets/${market.id}`}
+                      aria-label={accessibleName}
+                      className="block truncate font-medium hover:underline"
+                    >
+                      {market.symbol} ≥ {formatCurrency(market.threshold)}
+                    </Link>
+                    <p className="text-xs text-muted-foreground">
+                      Closes in {closesIn} · {market._count.positions} positions
+                    </p>
+                  </div>
+                </div>
+                <span
+                  role="cell"
+                  className="w-16 shrink-0 text-right text-sm"
+                >
+                  <span className="rounded bg-green-100 px-2 py-0.5 text-green-800">
+                    {formatPercent(yesPercent)}
+                  </span>
+                </span>
+                <span
+                  role="cell"
+                  className="w-16 shrink-0 text-right text-sm"
+                >
+                  <span className="rounded bg-red-100 px-2 py-0.5 text-red-800">
+                    {formatPercent(noPercent)}
+                  </span>
+                </span>
+                <span
+                  role="cell"
+                  className="w-16 shrink-0 text-right text-sm text-muted-foreground"
+                >
+                  —
+                </span>
+                <span
+                  role="cell"
+                  className="w-20 shrink-0 text-right text-sm text-muted-foreground"
+                >
+                  {closesIn}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

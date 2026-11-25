@@ -1,7 +1,8 @@
-import { contract } from '@stellar/stellar-sdk';
+import type { contract } from '@stellar/stellar-sdk';
 import Freighter from '@stellar/freighter-api';
 import { api } from './api';
 import { config } from './config';
+import { AUTH_ADDRESS_PARAM, I128_FIELDS, PREDICTION_FIELD, type TradeFunction } from './trade-args';
 
 /**
  * Two ways a user ends up with a usable Soroban address, sharing the same
@@ -14,6 +15,30 @@ import { config } from './config';
  * owns.
  */
 export type StoredWallet = { kind: 'freighter'; address: string } | { kind: 'email'; address: string };
+
+/**
+ * Thrown when the user declines a Freighter signing/connect prompt. Declining
+ * is a normal choice, not a failure — callers should treat this as a neutral
+ * "cancelled" state (clear busy, no red error) rather than surfacing the raw
+ * SDK/extension message.
+ */
+export class UserCancelledError extends Error {
+  constructor(message = 'Cancelled.') {
+    super(message);
+    this.name = 'UserCancelledError';
+  }
+}
+
+/**
+ * Freighter's extension surfaces a user decline as a rejection whose message
+ * varies by version ("User declined", "Request rejected", "The user rejected
+ * this request", etc.). Match those shapes so we can map them to a typed
+ * `UserCancelledError` instead of a red technical error.
+ */
+function isUserDeclined(message: string | undefined): boolean {
+  if (!message) return false;
+  return /declin|reject|cancel|denied|user closed/i.test(message);
+}
 
 /**
  * Freighter's own extension UI has no built-in timeout — if its popup is
@@ -80,6 +105,9 @@ export async function connectFreighter(): Promise<string> {
     'Freighter didn’t respond to the connect prompt — check the extension popup, or try again.',
   );
   if (error || !address) {
+    if (isUserDeclined(error?.message)) {
+      throw new UserCancelledError();
+    }
     throw new Error(error?.message ?? 'Connection was cancelled.');
   }
 
@@ -107,36 +135,6 @@ function predictionScVal(tag: string): { tag: string; values: undefined } {
   return { tag, values: undefined };
 }
 
-/**
- * Which wire-arg key holds the i128 amount(s) for each sponsorable
- * function, and which key is the `Prediction` enum, if any — the frontend
- * equivalent of `wire-args.ts`'s per-function field knowledge, since the
- * browser builds and signs its own transaction now instead of asking the
- * backend to. Keep in sync with that file's `AUTH_ADDRESS_PARAM`/switch.
- */
-const I128_FIELDS: Record<string, string[]> = {
-  buy: ['collateral_amount', 'min_shares_out'],
-  sell: ['shares_in', 'min_collateral_out'],
-  split: ['amount'],
-  merge: ['amount'],
-  transfer: ['amount'],
-  redeem: [],
-};
-const PREDICTION_FIELD: Partial<Record<string, string>> = {
-  buy: 'prediction',
-  sell: 'prediction',
-  transfer: 'prediction',
-};
-const AUTH_ADDRESS_PARAM: Record<string, string> = {
-  buy: 'user',
-  sell: 'user',
-  split: 'user',
-  merge: 'user',
-  redeem: 'user',
-  transfer: 'from',
-};
-
-type TradeFunction = 'buy' | 'sell' | 'split' | 'merge' | 'transfer' | 'redeem';
 
 /** Minimal typed surface for the one generated-client call `callAsWallet` makes — see `polaris-oracle`'s `stellar.service.ts` for why the backend's own typed interfaces don't cover these (it never calls them directly; it only ever relayed a user's own signed call). */
 type TradeContract = Record<
@@ -145,12 +143,41 @@ type TradeContract = Record<
 >;
 
 /**
+ * Contract specs are immutable per deployed WASM, so caching them by WASM
+ * hash is safe and lets every market sharing one WASM reuse a single fetch.
+ * Keyed by hash (not contract id) so a redeploy with a new WASM version
+ * never collides with a stale spec. `contract.Client.from` is only called
+ * on a cache miss; subsequent trades build `new contract.Client(spec, …)`
+ * directly, skipping the extra RPC round trip and WASM download.
+ */
+const specCache = new Map<string, contract.Spec>();
+
+async function getContractSpec(
+  contractId: string,
+  rpcUrl: string,
+  networkPassphrase: string,
+): Promise<contract.Spec> {
+  const { contract, rpc } = await import('@stellar/stellar-sdk');
+  const server = new rpc.Server(rpcUrl);
+  const wasmHash = (await server.getContractWasmByContractId(contractId)).toString('hex');
+  const cached = specCache.get(wasmHash);
+  if (cached) return cached;
+
+  // Cache miss: let the SDK fetch the spec once, then reuse it for every
+  // other contract sharing this WASM hash.
+  const client = await contract.Client.from({ contractId, rpcUrl, networkPassphrase });
+  const spec = client.spec;
+  specCache.set(wasmHash, spec);
+  return spec;
+}
+
+/**
  * Runs a market/perpetual contract call authorized by the stored wallet.
  *
  * - `'freighter'`: builds, simulates, and signs the transaction directly
- *   against Soroban RPC — `contract.Client.from` fetches the contract's
- *   real interface from the network (no bundled wasm/spec needed), and
- *   Freighter's own `signTransaction` plugs in as the client's signer
+ *   against Soroban RPC — the contract's real interface is fetched from the
+ *   network once per WASM hash and cached (no bundled wasm/spec needed),
+ *   and Freighter's own `signTransaction` plugs in as the client's signer
  *   as-is (the SDK's `Signer` type is documented to match it exactly). No
  *   backend relay, no sponsored fee — the connected wallet pays its own,
  *   same as any other Soroban dapp.
@@ -167,33 +194,56 @@ export async function callAsWallet(
   contractKind?: 'market' | 'perpetual',
 ): Promise<{ txHash: string }> {
   if (wallet.kind === 'email') {
-    return api.emailTrade({ contractId, function: functionName, args, contractKind });
+    return api.post<{ txHash: string }>('/auth/email/trade', {
+      contractId,
+      functionName,
+      args,
+      contractKind,
+    });
   }
 
-  const nativeArgs: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(args)) {
-    nativeArgs[key] = I128_FIELDS[functionName]?.includes(key) ? BigInt(value) : value;
-  }
-  if (PREDICTION_FIELD[functionName]) {
-    const field = PREDICTION_FIELD[functionName]!;
-    nativeArgs[field] = predictionScVal(nativeArgs[field] as string);
-  }
-  nativeArgs[AUTH_ADDRESS_PARAM[functionName]] = wallet.address;
-
-  const client = (await contract.Client.from({
+  const { contract, rpc, TransactionBuilder, Networks } = await import('@stellar/stellar-sdk');
+  const rpcUrl = config.sorobanRpcUrl;
+  const networkPassphrase = config.stellarNetworkPassphrase;
+  const spec = await getContractSpec(contractId, rpcUrl, networkPassphrase);
+  const client = new contract.Client(spec, {
     contractId,
-    rpcUrl: config.stellarRpcUrl,
-    networkPassphrase: config.stellarNetworkPassphrase,
+    rpcUrl,
+    networkPassphrase,
     publicKey: wallet.address,
-    signTransaction: (xdr, opts) =>
-      withTimeout(
-        Freighter.signTransaction(xdr, opts),
+    signTransaction: async (xdr: string) => {
+      const { signedTxXdr, error } = await withTimeout(
+        Freighter.signTransaction(xdr, { networkPassphrase, address: wallet.address }),
         SIGN_TIMEOUT_MS,
-        'Freighter didn’t respond to the signing request — check the extension popup, or try again.',
-      ),
-  })) as unknown as contract.Client & TradeContract;
+        'Freighter didn’t respond to the signing prompt — check the extension popup, or try again.',
+      );
+      if (error || !signedTxXdr) {
+        if (isUserDeclined(error?.message)) {
+          throw new UserCancelledError();
+        }
+        throw new Error(error?.message ?? 'Signing was cancelled.');
+      }
+      return { signedTxXdr, signerAddress: wallet.address };
+    },
+  });
 
-  const tx = await client[functionName](nativeArgs);
-  const sent = await tx.signAndSend();
-  return { txHash: sent.sendTransactionResponse?.hash ?? sent.getTransactionResponse?.txHash ?? '' };
+  const tradeContract = client as unknown as TradeContract;
+  const wireArgs: Record<string, unknown> = { ...args };
+  for (const field of I128_FIELDS[functionName] ?? []) {
+    if (wireArgs[field] !== undefined) {
+      wireArgs[field] = BigInt(String(wireArgs[field]));
+    }
+  }
+  const predictionField = PREDICTION_FIELD[functionName];
+  if (predictionField && wireArgs[predictionField] !== undefined) {
+    wireArgs[predictionField] = predictionScVal(String(wireArgs[predictionField]));
+  }
+  const authParam = AUTH_ADDRESS_PARAM[functionName];
+  if (authParam) {
+    wireArgs[authParam] = wallet.address;
+  }
+
+  const assembled = await tradeContract[functionName](wireArgs);
+  const sent = await assembled.signAndSend();
+  return { txHash: sent.sendTransactionResponse?.hash ?? '' };
 }

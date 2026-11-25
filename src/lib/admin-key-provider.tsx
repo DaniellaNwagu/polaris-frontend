@@ -17,6 +17,12 @@ interface AdminKeyContextValue {
    * the last probe's result for the *current* key value.
    */
   status: AdminKeyStatus;
+  /**
+   * Clears the stored key and returns to the gate. Removes the
+   * `sessionStorage` entry so a reload after locking does not restore
+   * access, and resets in-memory state to `'unset'`.
+   */
+  lock: () => void;
 }
 
 const AdminKeyContext = createContext<AdminKeyContextValue | null>(null);

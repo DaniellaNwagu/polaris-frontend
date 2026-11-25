@@ -3,7 +3,7 @@ import { config } from './config';
 /** A hung oracle (not erroring, just never responding) would otherwise leave every caller's busy state stuck forever with no recourse — same failure shape `freighter-wallet.ts`'s `withTimeout` guards against for signing. */
 const REQUEST_TIMEOUT_MS = 20_000;
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, validate?: Validator<T>): Promise<T> {
   const res = await fetch(`${config.oracleUrl}${path}`, {
     ...init,
     // Needed for the email-login session cookie (httpOnly, set by the
@@ -20,8 +20,85 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     err.status = res.status;
     throw err;
   }
-  return res.json() as Promise<T>;
+  const body: unknown = await res.json();
+  return validate ? validate(body, `${init?.method ?? 'GET'} ${path}`) : (body as T);
 }
+
+/**
+ * Runtime guards for the shapes that feed `BigInt()` math and status unions.
+ * The oracle is versioned independently, so a contract break should surface
+ * as a message naming the endpoint and field — not a `BigInt` `SyntaxError`
+ * thrown mid-render.
+ */
+type Validator<T> = (body: unknown, endpoint: string) => T;
+
+export class ApiContractError extends Error {
+  constructor(endpoint: string, field: string, detail: string) {
+    super(`Unexpected response from ${endpoint}: field "${field}" ${detail}`);
+    this.name = 'ApiContractError';
+  }
+}
+
+function asObject(body: unknown, endpoint: string): Record<string, unknown> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new ApiContractError(endpoint, '(body)', `expected an object, got ${JSON.stringify(body)}`);
+  }
+  return body as Record<string, unknown>;
+}
+
+const INTEGER_STRING = /^-?\d+$/;
+
+function checkIntegerStrings(o: Record<string, unknown>, endpoint: string, fields: string[]) {
+  for (const f of fields) {
+    if (typeof o[f] !== 'string' || !INTEGER_STRING.test(o[f] as string)) {
+      throw new ApiContractError(endpoint, f, `expected an integer string, got ${JSON.stringify(o[f])}`);
+    }
+  }
+}
+
+function checkNumbers(o: Record<string, unknown>, endpoint: string, fields: string[]) {
+  for (const f of fields) {
+    if (typeof o[f] !== 'number' || !Number.isFinite(o[f])) {
+      throw new ApiContractError(endpoint, f, `expected a number, got ${JSON.stringify(o[f])}`);
+    }
+  }
+}
+
+function checkStatus(o: Record<string, unknown>, endpoint: string, allowed: readonly string[]) {
+  if (typeof o.status !== 'string' || !allowed.includes(o.status)) {
+    throw new ApiContractError(
+      endpoint,
+      'status',
+      `has unknown value ${JSON.stringify(o.status)} (expected one of ${allowed.join(', ')})`,
+    );
+  }
+}
+
+function shape<T>(check: (o: Record<string, unknown>, endpoint: string) => void): Validator<T> {
+  return (body, endpoint) => {
+    const o = asObject(body, endpoint);
+    check(o, endpoint);
+    return o as T;
+  };
+}
+
+export const ON_CHAIN_MARKET_STATUSES = ['Open', 'ResolvedYes', 'ResolvedNo', 'Cancelled'] as const;
+export const ON_CHAIN_PERPETUAL_STATUSES = ['Open', 'Terminated'] as const;
+
+const validateMarketState = shape<OnChainMarket>((o, e) => {
+  checkIntegerStrings(o, e, ['poolYes', 'poolNo', 'totalSupply', 'strikePrice', 'finalPrice']);
+  checkStatus(o, e, ON_CHAIN_MARKET_STATUSES);
+});
+const validatePerpetualState = shape<OnChainPerpetual>((o, e) => {
+  checkIntegerStrings(o, e, ['poolYes', 'poolNo', 'totalSupply']);
+  checkStatus(o, e, ON_CHAIN_PERPETUAL_STATUSES);
+});
+const validatePosition = shape<{ yes: string; no: string }>((o, e) => checkIntegerStrings(o, e, ['yes', 'no']));
+const validateFee = shape<{ feeBps: number }>((o, e) => checkNumbers(o, e, ['feeBps']));
+const validatePrice = shape<{ yesBps: number; noBps: number; yesBpsChange: number | null }>((o, e) => {
+  checkNumbers(o, e, ['yesBps', 'noBps']);
+  if (o.yesBpsChange != null) checkNumbers(o, e, ['yesBpsChange']);
+});
 
 export type ApiError = Error & { status?: number };
 
@@ -40,8 +117,10 @@ export function messageFromApiError(err: unknown): string {
   const jsonStart = message.indexOf('{');
   if (jsonStart === -1) return message;
   try {
-    const body = JSON.parse(message.slice(jsonStart)) as { message?: string };
-    return body.message ?? message;
+    const body = JSON.parse(message.slice(jsonStart)) as { message?: unknown };
+    if (typeof body.message === 'string') return body.message;
+    if (Array.isArray(body.message)) return body.message.join('; ');
+    return message;
   } catch {
     return message;
   }
@@ -80,99 +159,33 @@ export interface OnChainMarket {
 }
 
 /**
- * `polaris-perpetual` — continuous trading, no strike/expiry/settle (see
- * `polaris-contracts/README.md`'s "The perpetual contract"). Deliberately
- * its own type, not `Partial<WatchedMarket>`/`Partial<OnChainMarket>`: a
- * perpetual genuinely has none of `strikePriceCents`/`expiry`/
- * `gracePeriodSecs`/`feedId`/`strikePrice`/`finalPrice`, so making those
- * optional-on-a-market-shape would misrepresent a structural difference as
- * a display nicety.
+ * Shared query options for live market data (price, pool state, fees, positions).
+ *
+ * These queries opt into `refetchOnWindowFocus` so that returning to the tab
+ * immediately refreshes stale reserves/odds instead of waiting for the next
+ * poll. React Query still respects `staleTime`, so a focus event only triggers
+ * a refetch when the cached data is actually stale — no refetch storm.
  */
-export interface WatchedPerpetual {
-  contractId: string;
-  status: 'watching' | 'terminated';
-  lastError?: string;
-  terminateTxHash?: string;
-  createdAt: number;
-  updatedAt: number;
-}
+export const liveMarketQueryOptions = {
+  refetchOnWindowFocus: true,
+} as const;
 
-export interface OnChainPerpetual {
-  admin: string;
-  collateral: string;
-  baseFeeBps: number;
-  minFeeBps: number;
-  treasury: string;
-  status: 'Open' | 'Terminated';
-  poolYes: string;
-  poolNo: string;
-  totalSupply: string;
-  initialLiquidity: string;
-  /** `0`/`"0"` until a `record_price_checkpoint` call has ever succeeded — purely informational, see the contract's own doc comment. No perpetual this backend deploys has an oracle configured yet, so this stays `"0"` in practice. */
-  lastPriceCents: string;
-  lastPriceAt: string;
-}
+/**
+ * Shared query options for admin and list queries, which should not refetch
+ * on window focus.
+ */
+export const staticQueryOptions = {
+  refetchOnWindowFocus: false,
+} as const;
 
-export interface AdminOverview {
-  totalMarkets: number;
-  marketsByStatus: Record<string, number>;
-  totalPerpetuals: number;
-  perpetualsByStatus: Record<string, number>;
-  vaultBalanceStroops: string | null;
-  totalWalletActions: number;
-  settlementChecksByOutcome: { ok: number; skipped: number; failed: number };
-}
-
-export interface AdminFeeRevenue {
-  totalStroops: string;
-  byMarket: { contractId: string; stroops: string }[];
-  sampleSize: number;
-}
-
-export interface VaultFlow {
-  id: number;
-  vault_contract_id: string;
-  amount_stroops: string;
-  market_contract_id: string;
-  tx_hash: string;
-  created_at: number;
-}
-
-export type AdminTreasury =
-  | { configured: false }
-  | {
-      configured: true;
-      vaultContract: string;
-      balanceStroops: string;
-      totalDepositedStroops: string;
-      recentWithdrawals: VaultFlow[];
-    };
-
-export interface AdminWallets {
-  passkeyAddressesSeen: string[];
-  emailWallets: { email: string; address: string; createdAt: number }[];
-}
-
-export interface AdminNetwork {
-  status: string;
-  latestLedger: number;
-  oldestLedger: number;
-  ledgerRetentionWindow: number;
-  oraclePublicKey: string;
-  deployerPublicKey: string;
-  contracts: Record<string, string | undefined>;
-  wasmHashes: Record<string, string | undefined>;
-}
-
-export interface SettlementCheck {
-  id: number;
-  market_contract_id: string;
-  lazer_price_cents: string | null;
-  hermes_price_cents: string | null;
-  divergence_bps: number | null;
-  outcome: 'ok' | 'skipped' | 'failed';
-  reason: string | null;
-  created_at: number;
+export function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        refetchOnWindowFocus: false,
+      },
+    },
+  });
 }
 
 export const api = {
@@ -180,12 +193,16 @@ export const api = {
   /** Every tracked market for one feed, newest first — used to find a resolved market's auto-rolled successor (see MarketFactoryService in polaris-oracle). */
   listMarketsForFeed: (feedId: number) => request<WatchedMarket[]>(`/markets?feedId=${feedId}`),
   getMarket: (id: string) => request<WatchedMarket>(`/markets/${id}`),
-  getMarketState: (id: string) => request<OnChainMarket>(`/markets/${id}/state`),
+  getMarketState: (id: string) => request<OnChainMarket>(`/markets/${id}/state`, undefined, validateMarketState),
   getPosition: (id: string, address: string) =>
-    request<{ yes: string; no: string }>(`/markets/${id}/position?address=${encodeURIComponent(address)}`),
+    request<{ yes: string; no: string }>(
+      `/markets/${id}/position?address=${encodeURIComponent(address)}`,
+      undefined,
+      validatePosition,
+    ),
   getPrice: (id: string) =>
-    request<{ yesBps: number; noBps: number; yesBpsChange: number | null }>(`/markets/${id}/price`),
-  getFee: (id: string) => request<{ feeBps: number }>(`/markets/${id}/fee`),
+    request<{ yesBps: number; noBps: number; yesBpsChange: number | null }>(`/markets/${id}/price`, undefined, validatePrice),
+  getFee: (id: string) => request<{ feeBps: number }>(`/markets/${id}/fee`, undefined, validateFee),
   getTickerPrice: (feedId: string) => request<unknown>(`/prices/${feedId}`),
 
   faucet: (address: string) =>
@@ -220,11 +237,15 @@ export const api = {
   // union: no strike/expiry/settle exist on this contract at all.
   listPerpetuals: () => request<WatchedPerpetual[]>('/perpetuals'),
   getPerpetual: (id: string) => request<WatchedPerpetual>(`/perpetuals/${id}`),
-  getPerpetualState: (id: string) => request<OnChainPerpetual>(`/perpetuals/${id}/state`),
+  getPerpetualState: (id: string) => request<OnChainPerpetual>(`/perpetuals/${id}/state`, undefined, validatePerpetualState),
   getPerpetualPosition: (id: string, address: string) =>
-    request<{ yes: string; no: string }>(`/perpetuals/${id}/position?address=${encodeURIComponent(address)}`),
-  getPerpetualPrice: (id: string) => request<{ yesBps: number; noBps: number }>(`/perpetuals/${id}/price`),
-  getPerpetualFee: (id: string) => request<{ feeBps: number }>(`/perpetuals/${id}/fee`),
+    request<{ yes: string; no: string }>(
+      `/perpetuals/${id}/position?address=${encodeURIComponent(address)}`,
+      undefined,
+      validatePosition,
+    ),
+  getPerpetualPrice: (id: string) => request<{ yesBps: number; noBps: number }>(`/perpetuals/${id}/price`, undefined, validatePrice),
+  getPerpetualFee: (id: string) => request<{ feeBps: number }>(`/perpetuals/${id}/fee`, undefined, validateFee),
 
   // admin
   createPerpetual: (adminKey: string, body: Record<string, unknown>) =>

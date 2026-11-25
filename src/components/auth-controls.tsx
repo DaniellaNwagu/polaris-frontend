@@ -6,72 +6,46 @@ import { useWallet } from '@/lib/wallet-provider';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { shortAddress, stroopsToXlm } from '@/lib/format';
+import { qk } from '@/lib/query-keys';
 
-/**
- * The full sign-in state machine — connect a Stellar wallet (Freighter) in
- * one click, with an email fallback (see `EmailAuthService`'s doc comment
- * in polaris-oracle for why that exists), plus sign-out once a wallet
- * exists. Shared between the header (`(app)/layout.tsx`) and the embed
- * widget rather than duplicated, since the state machine itself (five
- * distinct phases: signed-in, connecting, email-idle, email-code-sent,
- * signed-out) is identical between them — only sizing differs, via
- * `compact`.
- */
-export function AuthControls({ compact = false }: { compact?: boolean }) {
-  const {
-    wallet,
-    connecting,
-    freighterAvailable,
-    connectWallet,
-    emailStep,
-    emailBusy,
-    requestEmailCode,
-    verifyEmailCode,
-    resetEmailFlow,
-    logout,
-  } = useWallet();
-  const [showEmail, setShowEmail] = useState(false);
-  const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
+/** Backend rate-limits OTP requests; keep the resend link disabled for this long after each successful send so the user isn't just bouncing off that limit. */
+const RESEND_COOLDOWN_SECS = 30;
 
-  // Landing-page CTAs (`?new=1`, see hero.tsx/final-cta.tsx) land here
-  // rather than silently opening Freighter's connect prompt on page load —
-  // that requires a real user gesture, a query param alone can't satisfy
-  // it. This just relabels and highlights the actual button a first-time
-  // visitor needs to click, instead of leaving them to discover a plain
-  // "Connect" on their own. Read via window.location (not useSearchParams)
-  // so this component doesn't force a Suspense boundary onto every page
-  // that renders it.
-  //
-  // Deliberately not a lazy useState initializer, despite what the
-  // set-state-in-effect lint rule suggests — same reasoning as
-  // useAdminKey: this is server-rendered first (no query string known
-  // server-side), and matching that on the client's first hydration pass
-  // avoids a real hydration mismatch, not just an extra render.
-  const [firstTimeIntent, setFirstTimeIntent] = useState(false);
+type EmailStep = 'idle' | 'code-sent';
+
+export function AuthControls() {
+  const { address, email, connectEmail, disconnect } = useWallet();
+  const [emailStep, setEmailStep] = useState<EmailStep>('idle');
+  const [emailInput, setEmailInput] = useState('');
+  const [codeInput, setCodeInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(0);
+  const cooldownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('new') === '1') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setFirstTimeIntent(true);
-      params.delete('new');
-      const rest = params.toString();
-      window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : ''));
-    }
+    return () => {
+      if (cooldownTimer.current) clearInterval(cooldownTimer.current);
+    };
   }, []);
 
   const { data: balance } = useQuery({
-    queryKey: ['walletBalance', wallet?.address],
+    queryKey: qk.wallet.balance(wallet?.address),
     queryFn: () => api.getBalance(wallet!.address),
     enabled: !!wallet,
     refetchInterval: 20_000,
   });
 
-  const linkClass = `${compact ? 'text-[10px]' : 'text-[11px]'} text-[var(--muted)] underline hover:text-[var(--ink)]`;
-  const inputClass = `h-8 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2 ${compact ? 'text-xs' : 'text-xs'}`;
-  const btnSize = compact ? 'sm' : 'sm';
+  function resetEmailFlow() {
+    setEmailStep('idle');
+    setCodeInput('');
+    setError(null);
+    if (cooldownTimer.current) clearInterval(cooldownTimer.current);
+    cooldownTimer.current = null;
+    setCooldown(0);
+  }
 
-  if (wallet) {
+  if (address) {
     return (
       <div className="flex items-center gap-2">
         {balance && (
@@ -82,57 +56,48 @@ export function AuthControls({ compact = false }: { compact?: boolean }) {
         <span className="rounded-full bg-[var(--surface-2)] px-3 py-1.5 text-xs font-mono">
           {shortAddress(wallet.address)}
         </span>
-        <button type="button" onClick={logout} className={linkClass}>
-          Sign out
+        <button
+          type="button"
+          onClick={() => disconnect()}
+          className="rounded border border-neutral-700 px-3 py-1 text-xs hover:border-neutral-500"
+        >
+          Disconnect
         </button>
       </div>
     );
   }
 
-  if (connecting) {
+  if (emailStep === 'code-sent') {
     return (
-      <Button size={btnSize} disabled>
-        Confirm in Freighter…
-      </Button>
-    );
-  }
-
-  const effectiveShowEmail = showEmail || freighterAvailable === false;
-
-  if (effectiveShowEmail) {
-    if (emailStep === 'code-sent') {
-      return (
-        <form
-          className="flex flex-col items-end gap-1"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void verifyEmailCode(email, code);
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <input
-              autoFocus
-              disabled={emailBusy}
-              className={`${inputClass} w-24 disabled:opacity-60`}
-              placeholder="6-digit code"
-              inputMode="numeric"
-              maxLength={6}
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-            />
-            <Button size={btnSize} type="submit" disabled={emailBusy || code.length !== 6}>
-              {emailBusy ? 'Verifying…' : 'Verify'}
-            </Button>
-          </div>
+      <form onSubmit={handleVerify} className="flex flex-col gap-2 text-sm">
+        <p className="text-xs text-neutral-400">
+          We sent a code to <span className="font-mono">{emailInput}</span>.
+        </p>
+        <input
+          type="text"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          placeholder="6-digit code"
+          value={codeInput}
+          onChange={(e) => setCodeInput(e.target.value)}
+          className="rounded border border-neutral-700 bg-transparent px-3 py-1.5 text-sm"
+        />
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={busy || !codeInput}
+            className="rounded bg-white px-3 py-1 text-xs font-medium text-black disabled:opacity-50"
+          >
+            {busy ? 'Verifying…' : 'Verify'}
+          </button>
           <button
             type="button"
-            onClick={() => {
-              setCode('');
-              resetEmailFlow();
-            }}
-            className={linkClass}
+            onClick={handleResend}
+            disabled={busy || cooldown > 0}
+            className="text-xs text-neutral-400 underline-offset-2 hover:underline disabled:no-underline disabled:opacity-50"
           >
-            Use a different email
+            {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
           </button>
         </form>
       );
@@ -168,17 +133,26 @@ export function AuthControls({ compact = false }: { compact?: boolean }) {
           <button type="button" onClick={() => setShowEmail(false)} className={linkClass}>
             Use a wallet instead
           </button>
-        )}
+        </div>
       </form>
     );
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <Button
-        size={btnSize}
-        onClick={() => void connectWallet()}
-        className={firstTimeIntent ? 'animate-pulse ring-2 ring-[var(--accent)] ring-offset-2' : undefined}
+    <form onSubmit={handleRequestCode} className="flex flex-col gap-2 text-sm">
+      <input
+        type="email"
+        autoComplete="email"
+        placeholder="you@example.com"
+        value={emailInput}
+        onChange={(e) => setEmailInput(e.target.value)}
+        className="rounded border border-neutral-700 bg-transparent px-3 py-1.5 text-sm"
+      />
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      <button
+        type="submit"
+        disabled={busy || !emailInput}
+        className="rounded bg-white px-3 py-1 text-xs font-medium text-black disabled:opacity-50"
       >
         {compact ? (
           'Connect Wallet'
@@ -197,6 +171,6 @@ export function AuthControls({ compact = false }: { compact?: boolean }) {
       <button type="button" onClick={() => setShowEmail(true)} className={linkClass}>
         or use email
       </button>
-    </div>
+    </form>
   );
 }

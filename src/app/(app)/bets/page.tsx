@@ -6,8 +6,42 @@ import { useWallet } from '@/lib/wallet-provider';
 import { api } from '@/lib/api';
 import { Card, CardBody } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { AuthControls } from '@/components/auth-controls';
 import { centsToUsd, stroopsToXlm } from '@/lib/format';
 import { didWin, markToMarket, redeemableValue, type MarketStatus } from '@/lib/portfolio';
+import { qk } from '@/lib/query-keys';
+
+/**
+ * Fetches only the position for a single market/perpetual. Returns `null`
+ * when the wallet holds nothing, so the parent can skip mounting the full
+ * row (and its market/state/price queries) for markets the user doesn't
+ * hold — keeping request count proportional to positions held rather than
+ * to the total number of markets ever created.
+ */
+function PositionGate({
+  contractId,
+  kind,
+  children,
+}: {
+  contractId: string;
+  kind: 'market' | 'perpetual';
+  children: React.ReactNode;
+}) {
+  const { wallet } = useWallet();
+  const { data: position } = useQuery({
+    queryKey: [kind === 'market' ? 'position' : 'perpetualPosition', contractId, wallet?.address],
+    queryFn: () =>
+      kind === 'market'
+        ? api.getPosition(contractId, wallet!.address)
+        : api.getPerpetualPosition(contractId, wallet!.address),
+    enabled: !!wallet,
+  });
+
+  if (!position) return null;
+  if (BigInt(position.yes) === 0n && BigInt(position.no) === 0n) return null;
+  return <>{children}</>;
+}
 
 function PositionRow({ contractId }: { contractId: string }) {
   const { wallet } = useWallet();
@@ -20,12 +54,12 @@ function PositionRow({ contractId }: { contractId: string }) {
     queryFn: () => api.getMarketState(contractId),
   });
   const { data: position } = useQuery({
-    queryKey: ['position', contractId, wallet?.address],
+    queryKey: qk.market.position(contractId, wallet?.address),
     queryFn: () => api.getPosition(contractId, wallet!.address),
     enabled: !!wallet,
   });
   const { data: price } = useQuery({
-    queryKey: ['price', contractId],
+    queryKey: qk.market.price(contractId),
     queryFn: () => api.getPrice(contractId),
     enabled: state?.status === 'Open',
   });
@@ -79,20 +113,20 @@ function PositionRow({ contractId }: { contractId: string }) {
 function PerpetualPositionRow({ contractId }: { contractId: string }) {
   const { wallet } = useWallet();
   const { data: perpetual } = useQuery({
-    queryKey: ['perpetual', contractId],
+    queryKey: qk.perpetual.detail(contractId),
     queryFn: () => api.getPerpetual(contractId),
   });
   const { data: state } = useQuery({
-    queryKey: ['perpetualState', contractId],
+    queryKey: qk.perpetual.state(contractId),
     queryFn: () => api.getPerpetualState(contractId),
   });
   const { data: position } = useQuery({
-    queryKey: ['perpetualPosition', contractId, wallet?.address],
+    queryKey: qk.perpetual.position(contractId, wallet?.address),
     queryFn: () => api.getPerpetualPosition(contractId, wallet!.address),
     enabled: !!wallet,
   });
   const { data: price } = useQuery({
-    queryKey: ['perpetualPrice', contractId],
+    queryKey: qk.perpetual.price(contractId),
     queryFn: () => api.getPerpetualPrice(contractId),
     enabled: state?.status === 'Open',
   });
@@ -136,11 +170,21 @@ function PerpetualPositionRow({ contractId }: { contractId: string }) {
 
 export default function PortfolioPage() {
   const { wallet } = useWallet();
-  const { data: markets } = useQuery({ queryKey: ['markets'], queryFn: api.listMarkets });
-  const { data: perpetuals } = useQuery({ queryKey: ['perpetuals'], queryFn: api.listPerpetuals });
+  const { data: markets } = useQuery({ queryKey: qk.markets.list(), queryFn: api.listMarkets });
+  const { data: perpetuals } = useQuery({ queryKey: qk.perpetuals.list(), queryFn: api.listPerpetuals });
 
   if (!wallet) {
-    return <p className="text-sm text-[var(--muted)]">Connect your wallet to see your positions.</p>;
+    return (
+      <div>
+        <h1 className="mb-1 text-2xl font-bold">Portfolio</h1>
+        <p className="mb-4 text-sm text-[var(--muted)]">Connect your wallet to see your positions.</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button onClick={() => connectWallet()}>Connect Wallet</Button>
+          <span className="text-sm text-[var(--muted)]">or use email</span>
+          <AuthControls />
+        </div>
+      </div>
+    );
   }
 
   return (
