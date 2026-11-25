@@ -44,6 +44,8 @@ export function centsToUsd(cents: string | bigint): string {
 export function formatCountdown(expiryUnixSecs: number): string {
   const diff = expiryUnixSecs * 1000 - Date.now();
   if (diff <= 0) return 'expired';
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return `${secs}s`;
   const mins = Math.floor(diff / 60_000);
   const hours = Math.floor(mins / 60);
   const days = Math.floor(hours / 24);
