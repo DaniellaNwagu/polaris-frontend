@@ -31,6 +31,8 @@ export default async function AllPerpetualsPage() {
     });
   } catch (e) {
     error = e as Error;
+    // Log the raw error (path/status/body) for debugging; never render it.
+    console.error('Failed to load perpetuals', e);
   }
 
   const perpetuals = queryClient.getQueryData<Awaited<ReturnType<typeof api.listPerpetuals>>>([
@@ -44,7 +46,17 @@ export default async function AllPerpetualsPage() {
         Continuous XLM/USD markets — no expiry, trade any time.
       </p>
 
-      {error && <p className="text-sm text-[var(--no)]">Couldn&rsquo;t reach the backend: {error.message}</p>}
+      {error && (
+        <div className="flex items-center gap-3 text-sm text-[var(--no)]">
+          <span>Markets are temporarily unavailable.</span>
+          <Link
+            href="/perpetuals"
+            className="rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--fg)] hover:bg-[var(--surface)]"
+          >
+            Retry
+          </Link>
+        </div>
+      )}
       {perpetuals && perpetuals.length === 0 && (
         <p className="text-sm text-[var(--muted)]">No perpetuals yet — an admin can create one.</p>
       )}

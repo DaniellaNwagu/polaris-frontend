@@ -13,7 +13,7 @@ export default function PerpetualDetailPage({ params }: { params: Promise<{ id: 
   const { id } = use(params);
   const sheetRef = useRef<HTMLDivElement>(null);
 
-  const { data: perpetual } = useQuery({
+  const { data: perpetual, isLoading } = useQuery({
     queryKey: ['perpetual', id],
     queryFn: () => api.getPerpetual(id),
     refetchOnWindowFocus: true,
@@ -58,6 +58,9 @@ export default function PerpetualDetailPage({ params }: { params: Promise<{ id: 
 
   if (!perpetual) {
     return <p className="text-sm text-[var(--muted)]">Loading…</p>;
+  }
+  if (!perpetual) {
+    return <p className="text-sm text-[var(--muted)]">Perpetual unavailable.</p>;
   }
 
   const isOpen = perpetual.status === 'watching';

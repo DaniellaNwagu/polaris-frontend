@@ -50,7 +50,9 @@ export function TradeCard({
    * redeem succeeds but the buy then fails (slippage, pool depth, this
    * market already closed), the user simply holds the redeemed collateral
    * in their own wallet — not a fund-safety issue, the same recoverable
-   * failure shape `txError` already surfaces for any other failed buy.
+   * failure shape `txError` already surfaces for any other failed buy. The
+   * error message explicitly states the redeemed amount so the user doesn't
+   * think nothing happened and try to redeem again.
    */
   rolloverFromMarketId?: string;
 }) {
@@ -108,21 +110,50 @@ export function TradeCard({
     queryFn: () => api.getPosition(marketId, wallet!.address),
     enabled: !!wallet,
   });
+  // Shared with auth-controls.tsx — same key, so React Query dedupes and this
+  // costs nothing extra when the header already fetched it. Used to preflight
+  // the buy amount so an over-balance trade never opens a signing prompt.
+  const { data: walletBalance } = useQuery({
+    queryKey: ['walletBalance', wallet?.address],
+    queryFn: () => api.getBalance(wallet!.address),
+    enabled: !!wallet,
+  });
   const nextRound = useNextRound(market);
 
-  const { data: rolloverState } = useQuery({
-    queryKey: ['state', rolloverFromMarketId],
-    queryFn: () => api.getMarketState(rolloverFromMarketId!),
+  // `rolloverFromMarketId` comes straight from a URL query param, so it is
+  // attacker-controlled: anyone can share `/market/<real>?rolloverFrom=<any
+  // contract id>`. Only honor it when it names a market the backend actually
+  // tracks, on the same feed as this one, already terminal, and created
+  // before this market — the exact relationship `useNextRound` defines. An
+  // unknown/unrelated id must never reach `callAsWallet`'s redeem path.
+  const { data: rolloverMarket } = useQuery({
+    queryKey: ['market', rolloverFromMarketId],
+    queryFn: () => api.getMarket(rolloverFromMarketId!),
     enabled: !!rolloverFromMarketId,
+    retry: false,
+  });
+  const rolloverValid =
+    !!rolloverMarket &&
+    !!market &&
+    rolloverMarket.id !== market.id &&
+    rolloverMarket.feedId === market.feedId &&
+    rolloverMarket.status !== 'watching' &&
+    rolloverMarket.createdAt < market.createdAt;
+  const validatedRolloverId = rolloverValid ? rolloverFromMarketId : undefined;
+
+  const { data: rolloverState } = useQuery({
+    queryKey: ['state', validatedRolloverId],
+    queryFn: () => api.getMarketState(validatedRolloverId!),
+    enabled: !!validatedRolloverId,
   });
   const { data: rolloverPosition } = useQuery({
-    queryKey: ['position', rolloverFromMarketId, wallet?.address],
-    queryFn: () => api.getPosition(rolloverFromMarketId!, wallet!.address),
-    enabled: !!rolloverFromMarketId && !!wallet,
+    queryKey: ['position', validatedRolloverId, wallet?.address],
+    queryFn: () => api.getPosition(validatedRolloverId!, wallet!.address),
+    enabled: !!validatedRolloverId && !!wallet,
   });
   const rolloverStatus = (rolloverState?.status ?? null) as MarketStatus | null;
   const rolloverAmount =
-    rolloverStatus && rolloverStatus !== 'Open' && rolloverPosition
+    validatedRolloverId && rolloverStatus && rolloverStatus !== 'Open' && rolloverPosition
       ? redeemableValue(rolloverStatus, { yes: BigInt(rolloverPosition.yes), no: BigInt(rolloverPosition.no) })
       : 0n;
 
@@ -136,17 +167,42 @@ export function TradeCard({
     }
   }, [rolloverAmount]);
 
-  const payoutPreview = useMemo(() => {
+  // Single source of truth for the quote: the payout shown, the minimum
+  // shown, and the `min_shares_out` submitted by `handleTrade` all derive
+  // from this one computation, so the preview can never drift from what's
+  // actually sent on-chain.
+  const preview = useMemo(() => {
     if (!state || !fee) return null;
     try {
       const stroops = xlmToStroops(amount);
       if (stroops <= 0n) return null;
       const bonus = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
-      return stroopsToXlm((stroops + bonus).toString());
+      const estimate = stroops + bonus;
+      const minSharesOut = withSlippageTolerance(estimate, SLIPPAGE_TOLERANCE_BPS);
+      return {
+        payout: stroopsToXlm(estimate.toString()),
+        minSharesOut,
+        minReceived: stroopsToXlm(minSharesOut.toString()),
+      };
     } catch {
       return null;
     }
   }, [amount, side, state, fee]);
+
+  // Client-side preflight: if the entered amount exceeds the wallet balance
+  // (minus a small reserve for Freighter's own network fee), disable Buy and
+  // show the available balance instead of letting the user sign a tx that
+  // will only fail at the contract/RPC layer.
+  const balanceStroops = walletBalance != null ? BigInt(walletBalance) : null;
+  const amountStroops = useMemo(() => {
+    try {
+      return xlmToStroops(amount);
+    } catch {
+      return 0n;
+    }
+  }, [amount]);
+  const insufficientBalance =
+    balanceStroops != null && amountStroops > 0n && amountStroops > balanceStroops;
 
   if (!market) {
     return (
@@ -157,11 +213,22 @@ export function TradeCard({
       </Card>
     );
   }
+  if (!market) {
+    return (
+      <Card className={className}>
+        <CardBody className={bodyClassName}>
+          <p className="text-sm text-[var(--muted)]">Market unavailable.</p>
+        </CardBody>
+      </Card>
+    );
+  }
 
   const isOpen = market.status === 'watching';
 
   async function handleTrade() {
     if (!state || !fee) return;
+    // Never open a signing prompt for an amount the wallet can't cover.
+    if (insufficientBalance) return;
     setTxError(null);
     setTxResult(null);
 
@@ -177,9 +244,14 @@ export function TradeCard({
     }
 
     setBusy(true);
+    // Tracks whether the rollover redeem already landed, so a subsequent buy
+    // failure can tell the user their winnings are safely in their wallet
+    // instead of leaving them to think nothing happened.
+    let redeemedAmount: bigint | null = null;
     try {
       if (rolloverFromMarketId && rolloverAmount > 0n) {
         await callAsWallet(activeWallet, rolloverFromMarketId, 'redeem', {});
+        redeemedAmount = rolloverAmount;
         await queryClient.invalidateQueries({ queryKey: ['position', rolloverFromMarketId, activeWallet.address] });
       }
 

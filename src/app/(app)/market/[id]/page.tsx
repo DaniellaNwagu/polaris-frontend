@@ -11,6 +11,8 @@ import { EmbedCodeButton } from '@/components/embed-code-button';
 import { TradeCard } from '@/components/trade-card';
 import { centsToUsd, formatCountdown, statusLabel, stroopsToXlm, isPollableStatus, RESOLUTION_POLL_MS } from '@/lib/format';
 
+const PRICE_POLL_MS = 15_000;
+
 export default function MarketDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   // Carried by ResultReveal's "Next round is live" link when this market is
@@ -44,12 +46,38 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
     refetchInterval: (query) => (isPollableStatus(query.state.data?.status) ? RESOLUTION_POLL_MS : false),
     refetchOnWindowFocus: true,
   });
+  // Validate the untrusted `rolloverFrom` param: only honor it when it names a
+  // market the backend tracks, on the same feed, already terminal, and created
+  // before this one — the relationship `useNextRound` defines. Otherwise the
+  // redeem in TradeCard.handleTrade would target an arbitrary contract.
+  const { data: rolloverCandidate } = useQuery({
+    queryKey: ['market', rolloverFrom],
+    queryFn: () => api.getMarket(rolloverFrom!),
+    enabled: !!rolloverFrom,
+    retry: false,
+  });
+  const validRolloverFrom =
+    rolloverFrom &&
+    rolloverCandidate &&
+    market &&
+    rolloverCandidate.feedId === market.feedId &&
+    !isPollableStatus(rolloverCandidate.status) &&
+    rolloverCandidate.status !== 'pending' &&
+    new Date(rolloverCandidate.createdAt).getTime() < new Date(market.createdAt).getTime()
+      ? rolloverFrom
+      : undefined;
   const { data: price } = useQuery({
     queryKey: ['price', id],
     queryFn: () => api.getPrice(id),
-    refetchInterval: 15_000,
+    refetchInterval: PRICE_POLL_MS,
     enabled: market?.status === 'watching',
     refetchOnWindowFocus: true,
+  });
+  const { data: ticker } = useQuery({
+    queryKey: ['ticker', market?.feedId],
+    queryFn: () => api.getTickerPrice(market!.feedId),
+    refetchInterval: PRICE_POLL_MS,
+    enabled: !!market?.feedId,
   });
   const { data: state } = useQuery({
     queryKey: ['state', id],
@@ -65,11 +93,19 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
     refetchOnWindowFocus: true,
   });
 
-  if (!market) {
+  if (isLoading) {
     return <p className="text-sm text-[var(--muted)]">Loading…</p>;
+  }
+  if (!market) {
+    return <p className="text-sm text-[var(--muted)]">Market unavailable.</p>;
   }
 
   const isOpen = market.status === 'watching';
+
+  const strikeCents = market.strikePriceCents;
+  const nowCents = ticker?.priceCents;
+  const distancePct =
+    nowCents != null && strikeCents > 0 ? ((nowCents - strikeCents) / strikeCents) * 100 : null;
 
   return (
     <div
@@ -84,6 +120,22 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
         <h1 className="mb-3 text-2xl font-bold">
           Will XLM be ≥ {centsToUsd(market.strikePriceCents)} by expiry?
         </h1>
+
+        <div className="mb-4 text-sm text-[var(--muted)]">
+          {nowCents != null ? (
+            <>
+              XLM now: <span className="font-semibold text-[var(--fg)]">{centsToUsd(nowCents)}</span>
+              {distancePct != null && (
+                <span className="ml-1">
+                  ({distancePct >= 0 ? '▲' : '▼'} {Math.abs(distancePct).toFixed(1)}%{' '}
+                  {distancePct >= 0 ? 'above' : 'below'} strike)
+                </span>
+              )}
+            </>
+          ) : (
+            <span>XLM now: —</span>
+          )}
+        </div>
 
         <div className="mb-4">
           <EmbedCodeButton contractId={id} />
@@ -135,7 +187,7 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
       >
         <TradeCard
           marketId={id}
-          rolloverFromMarketId={rolloverFrom}
+          rolloverFromMarketId={validRolloverFrom}
           className="max-h-[70vh] overflow-y-auto rounded-none border-0 bg-transparent shadow-none lg:max-h-none lg:overflow-visible lg:rounded-2xl lg:border lg:border-[var(--line)] lg:bg-[var(--surface)] lg:shadow-sm"
           bodyClassName="p-0 lg:p-5"
         />

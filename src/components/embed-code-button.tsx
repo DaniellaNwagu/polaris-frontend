@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 
 /**
@@ -16,6 +16,51 @@ import { Button } from '@/components/ui/button';
 export function EmbedCodeButton({ contractId }: { contractId: string }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const preRef = useRef<HTMLPreElement>(null);
+  const resetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear any pending reset timer on unmount so we never set state after the
+  // component is gone.
+  useEffect(() => {
+    return () => {
+      if (resetTimeoutRef.current !== null) {
+        clearTimeout(resetTimeoutRef.current);
+        resetTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  const selectSnippet = () => {
+    const pre = preRef.current;
+    if (!pre) return;
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(pre);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  };
+
+  const handleCopy = async () => {
+    if (resetTimeoutRef.current !== null) {
+      clearTimeout(resetTimeoutRef.current);
+      resetTimeoutRef.current = null;
+    }
+    try {
+      await navigator.clipboard.writeText(snippet);
+      setCopyFailed(false);
+      setCopied(true);
+      resetTimeoutRef.current = setTimeout(() => {
+        setCopied(false);
+        resetTimeoutRef.current = null;
+      }, 1500);
+    } catch {
+      setCopied(false);
+      setCopyFailed(true);
+      selectSnippet();
+    }
+  };
 
   // Only read window once the panel is open (always post-hydration), so the
   // server and first client render match.
@@ -45,20 +90,20 @@ export function EmbedCodeButton({ contractId }: { contractId: string }) {
       </Button>
       {open && (
         <div className="mt-3 space-y-2">
-          <pre className="max-w-full overflow-x-auto rounded-lg border border-[var(--line)] bg-[var(--surface-2)] p-3 text-xs">
+          <pre
+            ref={preRef}
+            className="max-w-full overflow-x-auto rounded-lg border border-[var(--line)] bg-[var(--surface-2)] p-3 text-xs"
+          >
             {snippet}
           </pre>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              void navigator.clipboard.writeText(snippet);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }}
-          >
+          <Button size="sm" variant="ghost" onClick={() => void handleCopy()}>
             {copied ? 'Copied' : 'Copy'}
           </Button>
+          {copyFailed && (
+            <p className="text-xs text-[var(--danger)]" role="alert">
+              Couldn&apos;t copy — select the code manually
+            </p>
+          )}
           <p className="text-xs text-[var(--faint)]">
             Your site&apos;s CSP must allow this origin in <code>frame-src</code>. See the{' '}
             <a
