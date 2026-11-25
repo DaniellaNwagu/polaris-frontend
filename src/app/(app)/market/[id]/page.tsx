@@ -18,7 +18,7 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
   // `rolloverFromMarketId` doc comment.
   const rolloverFrom = useSearchParams().get('rolloverFrom') ?? undefined;
 
-  const { data: market } = useQuery({
+  const { data: market, isLoading } = useQuery({
     queryKey: ['market', id],
     queryFn: () => api.getMarket(id),
     refetchInterval: (query) => (isPollableStatus(query.state.data?.status) ? RESOLUTION_POLL_MS : false),
@@ -41,8 +41,11 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
     refetchInterval: 15_000,
   });
 
-  if (!market) {
+  if (isLoading) {
     return <p className="text-sm text-[var(--muted)]">Loading…</p>;
+  }
+  if (!market) {
+    return <p className="text-sm text-[var(--muted)]">Market unavailable.</p>;
   }
 
   const isOpen = market.status === 'watching';

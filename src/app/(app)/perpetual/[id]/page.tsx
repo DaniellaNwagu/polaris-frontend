@@ -12,7 +12,7 @@ import { stroopsToXlm, statusLabel, centsToUsd } from '@/lib/format';
 export default function PerpetualDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
 
-  const { data: perpetual } = useQuery({
+  const { data: perpetual, isLoading } = useQuery({
     queryKey: ['perpetual', id],
     queryFn: () => api.getPerpetual(id),
   });
@@ -34,8 +34,11 @@ export default function PerpetualDetailPage({ params }: { params: Promise<{ id: 
     refetchInterval: 15_000,
   });
 
-  if (!perpetual) {
+  if (isLoading) {
     return <p className="text-sm text-[var(--muted)]">Loading…</p>;
+  }
+  if (!perpetual) {
+    return <p className="text-sm text-[var(--muted)]">Perpetual unavailable.</p>;
   }
 
   const isOpen = perpetual.status === 'watching';
