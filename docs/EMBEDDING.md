@@ -69,5 +69,47 @@ auto-resize message — pick a fixed height.
 
 ## Events
 
-The widget does not yet post `resize` or trade events to the parent window.
-This section will document the `postMessage` contract once it ships.
+The widget posts a small set of lifecycle events to the parent window via
+`window.parent.postMessage(...)`. Every message is a plain object with a
+`type` field prefixed `polaris:`. Messages are sent with `targetOrigin '*'`,
+so **always check `event.origin`** against the Polaris origin before trusting
+a message.
+
+| `type` | When it fires | Payload |
+|---|---|---|
+| `polaris:ready` | The widget has mounted and initialized. | `{ type }` |
+| `polaris:connected` | A wallet has connected inside the embed. | `{ type }` |
+| `polaris:trade` | A trade has been confirmed on-chain. | `{ type, side, txHash }` |
+| `polaris:resolved` | The embedded market has resolved. | `{ type }` |
+
+`side` is `"yes"` or `"no"`; `txHash` is the Stellar transaction hash of the
+confirmed trade. Payloads never include wallet addresses, balances, or
+position sizes.
+
+### Listening on the host page
+
+```js
+const POLARIS_ORIGIN = 'https://<polaris-origin>';
+
+window.addEventListener('message', (event) => {
+  if (event.origin !== POLARIS_ORIGIN) return;
+  const data = event.data;
+  if (!data || typeof data.type !== 'string') return;
+
+  switch (data.type) {
+    case 'polaris:ready':
+      // Widget is up — safe to show it / start measuring.
+      break;
+    case 'polaris:connected':
+      // A visitor connected a wallet inside the embed.
+      break;
+    case 'polaris:trade':
+      // Conversion: { side, txHash }
+      console.log('trade confirmed', data.side, data.txHash);
+      break;
+    case 'polaris:resolved':
+      // The market resolved — update your own UI if needed.
+      break;
+  }
+});
+```

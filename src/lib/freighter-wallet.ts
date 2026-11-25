@@ -16,6 +16,30 @@ import { config } from './config';
 export type StoredWallet = { kind: 'freighter'; address: string } | { kind: 'email'; address: string };
 
 /**
+ * Thrown when the user declines a Freighter signing/connect prompt. Declining
+ * is a normal choice, not a failure — callers should treat this as a neutral
+ * "cancelled" state (clear busy, no red error) rather than surfacing the raw
+ * SDK/extension message.
+ */
+export class UserCancelledError extends Error {
+  constructor(message = 'Cancelled.') {
+    super(message);
+    this.name = 'UserCancelledError';
+  }
+}
+
+/**
+ * Freighter's extension surfaces a user decline as a rejection whose message
+ * varies by version ("User declined", "Request rejected", "The user rejected
+ * this request", etc.). Match those shapes so we can map them to a typed
+ * `UserCancelledError` instead of a red technical error.
+ */
+function isUserDeclined(message: string | undefined): boolean {
+  if (!message) return false;
+  return /declin|reject|cancel|denied|user closed/i.test(message);
+}
+
+/**
  * Freighter's own extension UI has no built-in timeout — if its popup is
  * dismissed without being closed (or never opens, e.g. a stale extension
  * state), the awaited promise can hang forever with the trade button stuck
@@ -80,6 +104,9 @@ export async function connectFreighter(): Promise<string> {
     'Freighter didn’t respond to the connect prompt — check the extension popup, or try again.',
   );
   if (error || !address) {
+    if (isUserDeclined(error?.message)) {
+      throw new UserCancelledError();
+    }
     throw new Error(error?.message ?? 'Connection was cancelled.');
   }
 
@@ -196,39 +223,56 @@ export async function callAsWallet(
   contractKind?: 'market' | 'perpetual',
 ): Promise<{ txHash: string }> {
   if (wallet.kind === 'email') {
-    return api.emailTrade({ contractId, function: functionName, args, contractKind });
+    return api.post<{ txHash: string }>('/auth/email/trade', {
+      contractId,
+      functionName,
+      args,
+      contractKind,
+    });
   }
 
-  const nativeArgs: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(args)) {
-    nativeArgs[key] = I128_FIELDS[functionName]?.includes(key) ? BigInt(value) : value;
-  }
-  if (PREDICTION_FIELD[functionName]) {
-    const field = PREDICTION_FIELD[functionName]!;
-    nativeArgs[field] = predictionScVal(nativeArgs[field] as string);
-  }
-  nativeArgs[AUTH_ADDRESS_PARAM[functionName]] = wallet.address;
-
-  // Loaded lazily so the Stellar SDK (XDR codegen, crypto) stays out of the
-  // first-load bundle for pages that never trade (e.g. `/welcome`, `/embed/*`).
-  const { contract } = await import('@stellar/stellar-sdk');
-
-  const spec = await getContractSpec(contractId, config.stellarRpcUrl, config.stellarNetworkPassphrase);
-
+  const { contract, rpc, TransactionBuilder, Networks } = await import('@stellar/stellar-sdk');
+  const rpcUrl = config.sorobanRpcUrl;
+  const networkPassphrase = config.stellarNetworkPassphrase;
+  const spec = await getContractSpec(contractId, rpcUrl, networkPassphrase);
   const client = new contract.Client(spec, {
     contractId,
-    rpcUrl: config.stellarRpcUrl,
-    networkPassphrase: config.stellarNetworkPassphrase,
+    rpcUrl,
+    networkPassphrase,
     publicKey: wallet.address,
-    signTransaction: (xdr, opts) =>
-      withTimeout(
-        Freighter.signTransaction(xdr, opts),
+    signTransaction: async (xdr: string) => {
+      const { signedTxXdr, error } = await withTimeout(
+        Freighter.signTransaction(xdr, { networkPassphrase, address: wallet.address }),
         SIGN_TIMEOUT_MS,
-        'Freighter didn’t respond to the signing request — check the extension popup, or try again.',
-      ),
-  }) as unknown as contract.Client & TradeContract;
+        'Freighter didn’t respond to the signing prompt — check the extension popup, or try again.',
+      );
+      if (error || !signedTxXdr) {
+        if (isUserDeclined(error?.message)) {
+          throw new UserCancelledError();
+        }
+        throw new Error(error?.message ?? 'Signing was cancelled.');
+      }
+      return { signedTxXdr, signerAddress: wallet.address };
+    },
+  });
 
-  const tx = await client[functionName](nativeArgs);
-  const sent = await tx.signAndSend();
+  const tradeContract = client as unknown as TradeContract;
+  const wireArgs: Record<string, unknown> = { ...args };
+  for (const field of I128_FIELDS[functionName] ?? []) {
+    if (wireArgs[field] !== undefined) {
+      wireArgs[field] = BigInt(String(wireArgs[field]));
+    }
+  }
+  const predictionField = PREDICTION_FIELD[functionName];
+  if (predictionField && wireArgs[predictionField] !== undefined) {
+    wireArgs[predictionField] = predictionScVal(String(wireArgs[predictionField]));
+  }
+  const authParam = AUTH_ADDRESS_PARAM[functionName];
+  if (authParam) {
+    wireArgs[authParam] = wallet.address;
+  }
+
+  const assembled = await tradeContract[functionName](wireArgs);
+  const sent = await assembled.signAndSend();
   return { txHash: sent.sendTransactionResponse?.hash ?? '' };
 }

@@ -26,6 +26,17 @@ import { useNextRound } from '@/lib/use-next-round';
 const SLIPPAGE_TOLERANCE_BPS = 200; // 2%
 
 /**
+ * Post a lifecycle event to the host page embedding this widget. Payloads
+ * intentionally carry no wallet address, balance, or position size — only
+ * the event name and, for trades, the side and tx hash. See the embed guide
+ * for the documented schema.
+ */
+function postToHost(type: string, payload: Record<string, unknown> = {}) {
+  if (typeof window === 'undefined' || window.parent === window) return;
+  window.parent.postMessage({ type, ...payload }, '*');
+}
+
+/**
  * The embeddable version of the market detail page — meant to run inside a
  * third-party site's `<iframe>`, not as a standalone destination. Freighter
  * connects the same way here as anywhere else (it's a browser extension
@@ -105,6 +116,32 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   });
   const nextRound = useNextRound(market);
 
+  // polaris:ready — fired once the widget has mounted and initialized.
+  useEffect(() => {
+    postToHost('polaris:ready');
+  }, []);
+
+  // polaris:connected — fired once a wallet connects in the embed. Guarded
+  // so it only fires on the transition into a connected state.
+  const wasConnected = useRef(false);
+  useEffect(() => {
+    if (wallet && !wasConnected.current) {
+      wasConnected.current = true;
+      postToHost('polaris:connected');
+    } else if (!wallet) {
+      wasConnected.current = false;
+    }
+  }, [wallet]);
+
+  // polaris:resolved — fired once the embedded market resolves.
+  const wasResolved = useRef(false);
+  useEffect(() => {
+    if (market && market.status === 'resolved' && !wasResolved.current) {
+      wasResolved.current = true;
+      postToHost('polaris:resolved');
+    }
+  }, [market]);
+
   const payoutPreview = useMemo(() => {
     if (!state || !fee) return null;
     try {
@@ -178,6 +215,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
         min_shares_out: minSharesOut.toString(),
       });
       setTxResult(txHash);
+      postToHost('polaris:trade', { side, txHash });
       await queryClient.invalidateQueries({ queryKey: ['price', id] });
     } catch (err) {
       setTxError(messageFromApiError(err));
@@ -276,11 +314,3 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 inputMode="decimal"
-              />
-            </div>
-          )}
-        </CardBody>
-      </Card>
-    </div>
-  );
-}

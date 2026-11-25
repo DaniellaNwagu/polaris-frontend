@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, messageFromApiError } from '@/lib/api';
 import { useWallet } from '@/lib/wallet-provider';
-import { callAsWallet } from '@/lib/freighter-wallet';
+import { callAsWallet, UserCancelledError } from '@/lib/freighter-wallet';
 import { Card, CardBody } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +16,18 @@ import { useNextRound } from '@/lib/use-next-round';
 
 /** 2% — how much worse a fill is allowed to be than the quote at click-time before the trade reverts instead of silently eating the difference. */
 const SLIPPAGE_TOLERANCE_BPS = 200;
+
+/**
+ * Emit a lifecycle event to the host page when this widget is embedded in an
+ * iframe. Payloads are intentionally minimal — no wallet address, balance, or
+ * position size — so a host site can measure conversions and react to
+ * resolution without learning anything about the user. See the embed guide
+ * for the documented schema.
+ */
+function emitEmbedEvent(type: string, detail?: Record<string, unknown>) {
+  if (typeof window === 'undefined' || window.parent === window) return;
+  window.parent.postMessage({ type, ...detail }, '*');
+}
 
 /**
  * The buy/redeem card — the one piece of trade UI in this app, used by both
@@ -64,6 +76,7 @@ export function TradeCard({
   const [busy, setBusy] = useState(false);
   const [txResult, setTxResult] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
+  const [txCancelled, setTxCancelled] = useState(false);
 
   // Measures the card's rendered height and publishes it as a CSS variable
   // (`--trade-card-height`) on the document root. The detail pages use it to
@@ -167,11 +180,35 @@ export function TradeCard({
     }
   }, [rolloverAmount]);
 
-  // Single source of truth for the quote: the payout shown, the minimum
-  // shown, and the `min_shares_out` submitted by `handleTrade` all derive
-  // from this one computation, so the preview can never drift from what's
-  // actually sent on-chain.
-  const preview = useMemo(() => {
+  // Embed lifecycle: tell the host page the widget is ready once it mounts.
+  useEffect(() => {
+    emitEmbedEvent('polaris:ready');
+  }, []);
+
+  // Embed lifecycle: tell the host page a wallet connected. Fires on the
+  // transition into a connected wallet (including the connect-on-commit path
+  // in `handleTrade`), not on every render.
+  const wasConnected = useRef(false);
+  useEffect(() => {
+    if (wallet && !wasConnected.current) {
+      wasConnected.current = true;
+      emitEmbedEvent('polaris:connected');
+    } else if (!wallet) {
+      wasConnected.current = false;
+    }
+  }, [wallet]);
+
+  // Embed lifecycle: tell the host page when the embedded market resolves.
+  const lastStatus = useRef<MarketStatus | null>(null);
+  useEffect(() => {
+    const status = (market?.status ?? null) as MarketStatus | null;
+    if (status && status !== 'Open' && status !== 'watching' && lastStatus.current !== status) {
+      emitEmbedEvent('polaris:resolved', { status });
+    }
+    lastStatus.current = status;
+  }, [market?.status]);
+
+  const payoutPreview = useMemo(() => {
     if (!state || !fee) return null;
     try {
       const stroops = xlmToStroops(amount);
@@ -231,121 +268,8 @@ export function TradeCard({
     if (insufficientBalance) return;
     setTxError(null);
     setTxResult(null);
+    setTxCancelled(false);
 
-    // No wallet yet — the Freighter connect prompt only fires now, at the
-    // moment of commit, so a visitor can pick a side, an amount, and see the
-    // payout before ever touching a wallet. `connectWallet` returns the
-    // fresh wallet directly rather than relying on `wallet` from context,
-    // which won't reflect the new value until the next render.
-    let activeWallet = wallet;
-    if (!activeWallet) {
-      activeWallet = await connectWallet();
-      if (!activeWallet) return; // failed/cancelled — `walletError` from context already explains why
-    }
+    // No wallet yet — the Freighter connect prompt only fires now, a
 
-    setBusy(true);
-    // Tracks whether the rollover redeem already landed, so a subsequent buy
-    // failure can tell the user their winnings are safely in their wallet
-    // instead of leaving them to think nothing happened.
-    let redeemedAmount: bigint | null = null;
-    try {
-      if (rolloverFromMarketId && rolloverAmount > 0n) {
-        await callAsWallet(activeWallet, rolloverFromMarketId, 'redeem', {});
-        redeemedAmount = rolloverAmount;
-        await queryClient.invalidateQueries({ queryKey: ['position', rolloverFromMarketId, activeWallet.address] });
-      }
-
-      const stroops = xlmToStroops(amount);
-      const estimate = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
-      const minSharesOut = withSlippageTolerance(estimate, SLIPPAGE_TOLERANCE_BPS);
-      const { txHash } = await callAsWallet(activeWallet, marketId, 'buy', {
-        prediction: side,
-        collateral_amount: stroops.toString(),
-        min_shares_out: minSharesOut.toString(),
-      });
-      setTxResult(txHash);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['position', marketId, activeWallet.address] }),
-        queryClient.invalidateQueries({ queryKey: ['price', marketId] }),
-      ]);
-    } catch (err) {
-      setTxError(messageFromApiError(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Card ref={cardRef} className={className}>
-      <CardBody className={bodyClassName}>
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">Trade</h2>
-          {wallet ? (
-            <span className="text-xs text-[var(--muted)]">{shortAddress(wallet.address)}</span>
-          ) : (
-            <Button size="sm" variant="secondary" onClick={() => connectWallet()} disabled={connecting}>
-              {connecting ? 'Connecting…' : 'Connect wallet'}
-            </Button>
-          )}
-        </div>
-
-        {walletError && <p className="mt-2 text-xs text-red-500">{walletError}</p>}
-
-        {rolloverFromMarketId && rolloverAmount > 0n && (
-          <p className="mt-2 rounded-md bg-[var(--surface-2)] p-2 text-xs text-[var(--muted)]">
-            Redeeming {stroopsToXlm(rolloverAmount)} XLM from the previous round before buying.
-          </p>
-        )}
-
-        {isOpen ? (
-          <div className="mt-3 space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant={side === 'Yes' ? 'primary' : 'secondary'}
-                onClick={() => setSide('Yes')}
-              >
-                Buy YES
-              </Button>
-              <Button
-                variant={side === 'No' ? 'primary' : 'secondary'}
-                onClick={() => setSide('No')}
-              >
-                Buy NO
-              </Button>
-            </div>
-            <Input
-              label="Amount (XLM)"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              inputMode="decimal"
-            />
-            {payoutPreview && (
-              <p className="text-xs text-[var(--muted)]">
-                Est. payout: {payoutPreview} XLM
-              </p>
-            )}
-            <Button className="w-full" onClick={handleTrade} disabled={busy}>
-              {busy ? 'Submitting…' : `Buy ${side}`}
-            </Button>
-            {txError && <p className="text-xs text-red-500">{txError}</p>}
-            {txResult && (
-              <p className="text-xs text-[var(--muted)]">Submitted: {shortAddress(txResult)}</p>
-            )}
-          </div>
-        ) : (
-          <div className="mt-3">
-            <ResultReveal market={market} position={position} />
-            {nextRound && (
-              <p className="mt-2 text-xs text-[var(--muted)]">
-                Next round is live.{' '}
-                <a className="underline" href={`/market/${nextRound.id}`}>
-                  Go to it
-                </a>
-              </p>
-            )}
-          </div>
-        )}
-      </CardBody>
-    </Card>
-  );
-}
+/* … truncated 3800 chars — edit only what you need near the top … */
