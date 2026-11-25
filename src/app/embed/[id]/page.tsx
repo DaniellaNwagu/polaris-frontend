@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useMemo, useState } from 'react';
+import { use, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, messageFromApiError } from '@/lib/api';
 import { useWallet } from '@/lib/wallet-provider';
@@ -37,6 +37,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   const { id } = use(params);
   const { wallet, connecting, error: walletError, freighterAvailable, connectWallet } = useWallet();
   const queryClient = useQueryClient();
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const [side, setSide] = useState<'Yes' | 'No'>('Yes');
   const [amount, setAmount] = useState('10');
@@ -56,12 +57,23 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   const openInPolarisHref =
     typeof window !== 'undefined' ? `${window.location.origin}/market/${id}` : '#';
 
-  const {
-    data: market,
-    error: marketError,
-    isPending: marketPending,
-    refetch: refetchMarket,
-  } = useQuery({
+  // Report the widget's content height to the host page so it can size the
+  // iframe to fit — otherwise taller states (email fallback, ResultReveal,
+  // multi-line errors) clip or scroll and shorter ones leave dead space.
+  // Payload is intentionally just { type, height } — no wallet/position data.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof window === 'undefined' || window.parent === window) return;
+    const post = () => {
+      window.parent.postMessage({ type: 'polaris:resize', height: el.scrollHeight }, '*');
+    };
+    post();
+    const observer = new ResizeObserver(post);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const { data: market } = useQuery({
     queryKey: ['market', id],
     queryFn: () => api.getMarket(id),
     refetchInterval: (query) => (isPollableStatus(query.state.data?.status) ? RESOLUTION_POLL_MS : false),
@@ -130,7 +142,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
       );
     }
     return (
-      <div className="p-4 text-center text-sm text-[var(--muted)]">Loading…</div>
+      <div ref={rootRef} className="p-4 text-sm text-[var(--muted)]">Loading…</div>
     );
   }
 
@@ -175,7 +187,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   }
 
   return (
-    <div className="p-3">
+    <div ref={rootRef} className="p-3">
       <Card>
         <CardBody className="space-y-3 p-4">
           <div className="flex items-center justify-between">
@@ -264,10 +276,11 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 inputMode="decimal"
-                placeholder="XLM amount"
               />
-              {payoutPreview && (
-                <p className="text-[10px] text-[var(--faint)]">
-                  You get <span className="
-
-/* … truncated 90 chars — edit only what you need near the top … */
+            </div>
+          )}
+        </CardBody>
+      </Card>
+    </div>
+  );
+}

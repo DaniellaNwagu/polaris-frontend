@@ -1,6 +1,6 @@
 'use client';
 
-import { use } from 'react';
+import { use, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -20,10 +20,31 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
   // `rolloverFromMarketId` doc comment.
   const rolloverFrom = useSearchParams().get('rolloverFrom') ?? undefined;
 
-  const { data: market, isLoading } = useQuery({
+  // Measure the fixed bottom trade sheet so the page can pad itself by the
+  // sheet's actual height instead of a hardcoded value. The sheet grows with
+  // error messages, rollover notes, result reveal + redeem, and the email
+  // form, so a fixed padding would hide content behind it.
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sheetRef.current;
+    if (!el) return;
+    const update = () => {
+      document.documentElement.style.setProperty('--trade-sheet-height', `${el.offsetHeight}px`);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty('--trade-sheet-height');
+    };
+  }, []);
+
+  const { data: market } = useQuery({
     queryKey: ['market', id],
     queryFn: () => api.getMarket(id),
     refetchInterval: (query) => (isPollableStatus(query.state.data?.status) ? RESOLUTION_POLL_MS : false),
+    refetchOnWindowFocus: true,
   });
   // Validate the untrusted `rolloverFrom` param: only honor it when it names a
   // market the backend tracks, on the same feed, already terminal, and created
@@ -50,6 +71,7 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
     queryFn: () => api.getPrice(id),
     refetchInterval: PRICE_POLL_MS,
     enabled: market?.status === 'watching',
+    refetchOnWindowFocus: true,
   });
   const { data: ticker } = useQuery({
     queryKey: ['ticker', market?.feedId],
@@ -61,12 +83,14 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
     queryKey: ['state', id],
     queryFn: () => api.getMarketState(id),
     refetchInterval: isPollableStatus(market?.status) ? RESOLUTION_POLL_MS : false,
+    refetchOnWindowFocus: true,
   });
   const { data: fee } = useQuery({
     queryKey: ['fee', id],
     queryFn: () => api.getFee(id),
     enabled: market?.status === 'watching',
-    refetchInterval: PRICE_POLL_MS,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   });
 
   if (isLoading) {
@@ -84,7 +108,10 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
     nowCents != null && strikeCents > 0 ? ((nowCents - strikeCents) / strikeCents) * 100 : null;
 
   return (
-    <div className="grid grid-cols-1 gap-6 pb-56 lg:grid-cols-3 lg:pb-0">
+    <div
+      className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:pb-0"
+      style={{ paddingBottom: 'calc(var(--trade-sheet-height, 14rem) + 1rem)' }}
+    >
       <div className="lg:col-span-2">
         <div className="mb-4 flex items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-[var(--faint)]">XLM/USD</span>
@@ -154,6 +181,7 @@ export default function MarketDetailPage({ params }: { params: Promise<{ id: str
       </div>
 
       <div
+        ref={sheetRef}
         className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--line)] bg-[var(--bg)] px-4 pt-3 shadow-[0_-8px_24px_rgba(0,0,0,0.12)] lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none"
         style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
       >

@@ -8,6 +8,10 @@ import { Button } from '@/components/ui/button';
  * (`/embed/[id]`). No special `allow` permissions needed: Freighter is a
  * browser extension, not a page API gated by permissions policy, so it
  * works inside a cross-origin iframe same as the top-level app.
+ *
+ * The widget posts `{ type: 'polaris:resize', height }` to its parent on
+ * mount and on every size change, so the snippet includes a small listener
+ * that keeps the iframe height in sync with the widget's content.
  */
 export function EmbedCodeButton({ contractId }: { contractId: string }) {
   const [open, setOpen] = useState(false);
@@ -62,6 +66,7 @@ export function EmbedCodeButton({ contractId }: { contractId: string }) {
   // server and first client render match.
   const origin = open ? window.location.origin : '';
   const snippet = `<iframe
+  id="polaris-${contractId}"
   src="${origin}/embed/${contractId}"
   width="360" height="420"
   style="border:0;border-radius:16px;overflow:hidden"
@@ -69,7 +74,14 @@ export function EmbedCodeButton({ contractId }: { contractId: string }) {
   sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms"
   referrerpolicy="strict-origin-when-cross-origin"
   loading="lazy"
-></iframe>`;
+></iframe>
+<script>
+  window.addEventListener('message', function (e) {
+    if (e.origin !== '${origin}' || !e.data || e.data.type !== 'polaris:resize') return;
+    var f = document.getElementById('polaris-${contractId}');
+    if (f && typeof e.data.height === 'number') f.style.height = e.data.height + 'px';
+  });
+</script>`;
 
   return (
     <div>
