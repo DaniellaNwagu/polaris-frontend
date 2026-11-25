@@ -157,7 +157,6 @@ export type AdminTreasury =
     };
 
 export interface AdminWallets {
-  passkeyAddressesSeen: string[];
   emailWallets: { email: string; address: string; createdAt: number }[];
 }
 
@@ -206,10 +205,6 @@ export const api = {
     request<{ address: string }>('/auth/email/verify', { method: 'POST', body: JSON.stringify({ email, code }) }),
   getEmailSession: () => request<{ email: string; address: string }>('/auth/email/me'),
   emailLogout: () => request<{ ok: boolean }>('/auth/email/logout', { method: 'POST' }),
-  emailTrade: (params: {
-    contractId: string;
-    function: string;
-    args: Record<string, string | number>;
-    contractKind?: 'market' | 'perpetual';
-  }) => request<{ txHash: string }>('/auth/email/trade', { method: 'POST', body: JSON.stringify(params) }),
-};
+  emailTrade: (
+
+/* … truncated 253 chars — edit only what you need near the top … */

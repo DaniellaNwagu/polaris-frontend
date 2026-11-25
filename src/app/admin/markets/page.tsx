@@ -7,7 +7,8 @@ import { useAdminKey } from '@/lib/admin-key-provider';
 import { Card, CardBody } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { centsToUsd, shortAddress } from '@/lib/format';
+import { Address } from '@/components/ui/address';
+import { centsToUsd } from '@/lib/format';
 
 /** Relocated from `(app)/admin/page.tsx` verbatim (minus the admin-key input, now handled once by `admin/layout.tsx`'s gate) as part of the dashboard rebuild — see the other `admin/*` pages for what's actually new. */
 export default function AdminMarketsPage() {
@@ -45,7 +46,7 @@ export default function AdminMarketsPage() {
           <Card key={m.contractId}>
             <CardBody className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="font-mono text-xs text-[var(--faint)]">{shortAddress(m.contractId)}</div>
+                <Address value={m.contractId} />
                 <div className="text-sm font-semibold">≥ {centsToUsd(m.strikePriceCents)}</div>
                 {m.lastError && (
                   <div className="mt-1 text-xs text-[var(--no)] max-w-md break-all">{m.lastError}</div>
