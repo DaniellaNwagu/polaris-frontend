@@ -4,26 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import type { Market } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/cn';
-
-type FilterKey = 'attention' | 'open' | 'closed' | 'all';
-
-const TERMINAL_STATUSES = new Set(['settled', 'closed', 'resolved', 'cancelled']);
-
-function needsAttention(market: Market): boolean {
-  return market.status === 'pending' || Boolean(market.lastError);
-}
-
-function isOpen(market: Market): boolean {
-  return !TERMINAL_STATUSES.has(market.status);
-}
-
-const FILTERS: { key: FilterKey; label: string; match: (market: Market) => boolean }[] = [
-  { key: 'attention', label: 'Needs attention', match: needsAttention },
-  { key: 'open', label: 'Open', match: isOpen },
-  { key: 'closed', label: 'Closed', match: (market) => !isOpen(market) },
-  { key: 'all', label: 'All', match: () => true },
-];
+import { centsToUsd, shortAddress } from '@/lib/format';
+import { qk } from '@/lib/query-keys';
 
 export default function AdminMarketsPage() {
   const [markets, setMarkets] = useState<Market[]>([]);
@@ -31,31 +13,19 @@ export default function AdminMarketsPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>('attention');
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    api
-      .listMarkets()
-      .then((data) => {
-        if (!cancelled) setMarkets(data);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load markets');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: markets } = useQuery({ queryKey: qk.markets.list(), queryFn: api.listMarkets });
 
-  const counts = useMemo(() => {
-    const result: Record<FilterKey, number> = { attention: 0, open: 0, closed: 0, all: markets.length };
-    for (const market of markets) {
-      if (needsAttention(market)) result.attention += 1;
-      if (isOpen(market)) result.open += 1;
-      else result.closed += 1;
+  async function act(action: 'settle' | 'cancel', contractId: string) {
+    setBusyId(contractId);
+    setError(null);
+    try {
+      if (action === 'settle') await api.triggerSettle(adminKey, contractId);
+      else await api.triggerCancel(adminKey, contractId);
+      await queryClient.invalidateQueries({ queryKey: qk.markets.list() });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusyId(null);
     }
     return result;
   }, [markets]);

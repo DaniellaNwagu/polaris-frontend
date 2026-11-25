@@ -1,8 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { api, messageFromApiError } from '@/lib/api';
-import { useWallet } from './wallet-provider';
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useWallet } from '@/lib/wallet-provider';
+import { Button } from '@/components/ui/button';
+import { api } from '@/lib/api';
+import { shortAddress, stroopsToXlm } from '@/lib/format';
+import { qk } from '@/lib/query-keys';
 
 /** Backend rate-limits OTP requests; keep the resend link disabled for this long after each successful send so the user isn't just bouncing off that limit. */
 const RESEND_COOLDOWN_SECS = 30;
@@ -25,64 +29,12 @@ export function AuthControls() {
     };
   }, []);
 
-  function startCooldown() {
-    if (cooldownTimer.current) clearInterval(cooldownTimer.current);
-    setCooldown(RESEND_COOLDOWN_SECS);
-    cooldownTimer.current = setInterval(() => {
-      setCooldown((prev) => {
-        if (prev <= 1) {
-          if (cooldownTimer.current) clearInterval(cooldownTimer.current);
-          cooldownTimer.current = null;
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }
-
-  async function handleRequestCode(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await api.requestEmailCode(emailInput);
-      setEmailStep('code-sent');
-      startCooldown();
-    } catch (err) {
-      setError(messageFromApiError(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleResend() {
-    if (cooldown > 0 || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await api.requestEmailCode(emailInput);
-      startCooldown();
-    } catch (err) {
-      setError(messageFromApiError(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleVerify(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await connectEmail(emailInput, codeInput);
-      setEmailStep('idle');
-      setCodeInput('');
-    } catch (err) {
-      setError(messageFromApiError(err));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const { data: balance } = useQuery({
+    queryKey: qk.wallet.balance(wallet?.address),
+    queryFn: () => api.getBalance(wallet!.address),
+    enabled: !!wallet,
+    refetchInterval: 20_000,
+  });
 
   function resetEmailFlow() {
     setEmailStep('idle');

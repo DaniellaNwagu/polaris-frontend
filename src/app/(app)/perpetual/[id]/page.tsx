@@ -8,31 +8,32 @@ import { Badge } from '@/components/ui/badge';
 import { OddsBar } from '@/components/odds-bar';
 import { PerpetualTradeCard } from '@/components/perpetual-trade-card';
 import { stroopsToXlm, statusLabel, centsToUsd } from '@/lib/format';
+import { qk } from '@/lib/query-keys';
 
 export default function PerpetualDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const sheetRef = useRef<HTMLDivElement>(null);
 
-  const { data: perpetual, isLoading } = useQuery({
-    queryKey: ['perpetual', id],
+  const { data: perpetual } = useQuery({
+    queryKey: qk.perpetual.detail(id),
     queryFn: () => api.getPerpetual(id),
     refetchOnWindowFocus: true,
   });
   const { data: price } = useQuery({
-    queryKey: ['perpetualPrice', id],
+    queryKey: qk.perpetual.price(id),
     queryFn: () => api.getPerpetualPrice(id),
     refetchInterval: 15_000,
     refetchOnWindowFocus: true,
     enabled: perpetual?.status === 'watching',
   });
   const { data: state } = useQuery({
-    queryKey: ['perpetualState', id],
+    queryKey: qk.perpetual.state(id),
     queryFn: () => api.getPerpetualState(id),
     refetchInterval: perpetual?.status === 'watching' ? 15_000 : false,
     refetchOnWindowFocus: true,
   });
   const { data: fee } = useQuery({
-    queryKey: ['perpetualFee', id],
+    queryKey: qk.perpetual.fee(id),
     queryFn: () => api.getPerpetualFee(id),
     enabled: perpetual?.status === 'watching',
     refetchInterval: 15_000,

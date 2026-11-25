@@ -6,22 +6,8 @@ import { api, messageFromApiError, type OnChainPerpetual, type WatchedPerpetual 
 import { useAdminKey } from '@/components/admin-key-provider';
 import { Address } from '@/components/ui/address';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
-import { formatCents, formatDate } from '@/lib/format';
-
-interface PerpetualRow {
-  watched: WatchedPerpetual;
-  state: OnChainPerpetual | null;
-  stateError: string | null;
-}
-
-/** Same rule as `perpetual/[id]/page.tsx`: `lastPriceAt === 0` means `record_price_checkpoint` has never succeeded. */
-function hasCheckpoint(state: OnChainPerpetual | null): boolean {
-  return !!state && state.lastPriceAt !== '0';
-}
+import { shortAddress, statusLabel, centsToUsd } from '@/lib/format';
+import { qk } from '@/lib/query-keys';
 
 export default function AdminPerpetualsPage() {
   const { adminKey } = useAdminKey();
@@ -31,26 +17,7 @@ export default function AdminPerpetualsPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [checkpointPrice, setCheckpointPrice] = useState('');
 
-  const load = useCallback(async () => {
-    if (!adminKey) return;
-    setError(null);
-    try {
-      const watched = await api.listPerpetuals();
-      const withState = await Promise.all(
-        watched.map(async (w): Promise<PerpetualRow> => {
-          try {
-            const state = await api.getPerpetualState(w.contractId);
-            return { watched: w, state, stateError: null };
-          } catch (err) {
-            return { watched: w, state: null, stateError: messageFromApiError(err) };
-          }
-        }),
-      );
-      setRows(withState);
-    } catch (err) {
-      setError(messageFromApiError(err));
-    }
-  }, [adminKey]);
+  const { data: perpetuals } = useQuery({ queryKey: qk.perpetuals.list(), queryFn: api.listPerpetuals });
 
   useEffect(() => {
     void load();
@@ -66,9 +33,8 @@ export default function AdminPerpetualsPage() {
     setBusyId(contractId);
     setActionError(null);
     try {
-      await api.recordPerpetualCheckpoint(contractId, Math.round(cents), adminKey);
-      setCheckpointPrice('');
-      await load();
+      await api.triggerTerminate(adminKey, contractId);
+      await queryClient.invalidateQueries({ queryKey: qk.perpetuals.list() });
     } catch (err) {
       setActionError(messageFromApiError(err));
     } finally {
@@ -81,8 +47,9 @@ export default function AdminPerpetualsPage() {
     setBusyId(contractId);
     setActionError(null);
     try {
-      await api.terminatePerpetual(contractId, adminKey);
-      await load();
+      const result = await api.triggerCheckpoint(adminKey, contractId);
+      setLastCheckpoint((prev) => ({ ...prev, [contractId]: centsToUsd(result.lastPriceCents) }));
+      await queryClient.invalidateQueries({ queryKey: qk.perpetual.state(contractId) });
     } catch (err) {
       setActionError(messageFromApiError(err));
     } finally {

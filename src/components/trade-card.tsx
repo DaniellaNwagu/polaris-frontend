@@ -13,6 +13,7 @@ import { stroopsToXlm, xlmToStroops, shortAddress, isPollableStatus, RESOLUTION_
 import { redeemableValue, type MarketStatus } from '@/lib/portfolio';
 import { estimateBuyOut, withSlippageTolerance } from '@/lib/amm';
 import { useNextRound } from '@/lib/use-next-round';
+import { invalidateAfterTrade, qk } from '@/lib/query-keys';
 
 /** 2% — how much worse a fill is allowed to be than the quote at click-time before the trade reverts instead of silently eating the difference. */
 const SLIPPAGE_TOLERANCE_BPS = 200;
@@ -100,7 +101,7 @@ export function TradeCard({
   }, []);
 
   const { data: market } = useQuery({
-    queryKey: ['market', marketId],
+    queryKey: qk.market.detail(marketId),
     queryFn: () => api.getMarket(marketId),
     // Keeps polling while a resolution could still land, so a bettor sitting
     // on this card sees it happen instead of only on next page load — see
@@ -108,18 +109,18 @@ export function TradeCard({
     refetchInterval: (query) => (isPollableStatus(query.state.data?.status) ? RESOLUTION_POLL_MS : false),
   });
   const { data: state } = useQuery({
-    queryKey: ['state', marketId],
+    queryKey: qk.market.state(marketId),
     queryFn: () => api.getMarketState(marketId),
     refetchInterval: isPollableStatus(market?.status) ? RESOLUTION_POLL_MS : false,
   });
   const { data: fee } = useQuery({
-    queryKey: ['fee', marketId],
+    queryKey: qk.market.fee(marketId),
     queryFn: () => api.getFee(marketId),
     enabled: market?.status === 'watching',
     refetchInterval: 15_000,
   });
   const { data: position } = useQuery({
-    queryKey: ['position', marketId, wallet?.address],
+    queryKey: qk.market.position(marketId, wallet?.address),
     queryFn: () => api.getPosition(marketId, wallet!.address),
     enabled: !!wallet,
   });
@@ -133,15 +134,9 @@ export function TradeCard({
   });
   const nextRound = useNextRound(market);
 
-  // `rolloverFromMarketId` comes straight from a URL query param, so it is
-  // attacker-controlled: anyone can share `/market/<real>?rolloverFrom=<any
-  // contract id>`. Only honor it when it names a market the backend actually
-  // tracks, on the same feed as this one, already terminal, and created
-  // before this market — the exact relationship `useNextRound` defines. An
-  // unknown/unrelated id must never reach `callAsWallet`'s redeem path.
-  const { data: rolloverMarket } = useQuery({
-    queryKey: ['market', rolloverFromMarketId],
-    queryFn: () => api.getMarket(rolloverFromMarketId!),
+  const { data: rolloverState } = useQuery({
+    queryKey: qk.market.state(rolloverFromMarketId),
+    queryFn: () => api.getMarketState(rolloverFromMarketId!),
     enabled: !!rolloverFromMarketId,
     retry: false,
   });
@@ -160,9 +155,9 @@ export function TradeCard({
     enabled: !!validatedRolloverId,
   });
   const { data: rolloverPosition } = useQuery({
-    queryKey: ['position', validatedRolloverId, wallet?.address],
-    queryFn: () => api.getPosition(validatedRolloverId!, wallet!.address),
-    enabled: !!validatedRolloverId && !!wallet,
+    queryKey: qk.market.position(rolloverFromMarketId, wallet?.address),
+    queryFn: () => api.getPosition(rolloverFromMarketId!, wallet!.address),
+    enabled: !!rolloverFromMarketId && !!wallet,
   });
   const rolloverStatus = (rolloverState?.status ?? null) as MarketStatus | null;
   const rolloverAmount =
@@ -270,6 +265,104 @@ export function TradeCard({
     setTxResult(null);
     setTxCancelled(false);
 
-    // No wallet yet — the Freighter connect prompt only fires now, a
+    // No wallet yet — the Freighter connect prompt only fires now, at the
+    // moment of commit, so a visitor can pick a side, an amount, and see the
+    // payout before ever touching a wallet. `connectWallet` returns the
+    // fresh wallet directly rather than relying on `wallet` from context,
+    // which won't reflect the new value until the next render.
+    let activeWallet = wallet;
+    if (!activeWallet) {
+      activeWallet = await connectWallet();
+      if (!activeWallet) return; // failed/cancelled — `walletError` from context already explains why
+    }
+
+    setBusy(true);
+    try {
+      if (rolloverFromMarketId && rolloverAmount > 0n) {
+        await callAsWallet(activeWallet, rolloverFromMarketId, 'redeem', {});
+        await invalidateAfterTrade(queryClient, { kind: 'market', id: rolloverFromMarketId, address: activeWallet.address });
+      }
+
+      const stroops = xlmToStroops(amount);
+      const estimate = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
+      const minSharesOut = withSlippageTolerance(estimate, SLIPPAGE_TOLERANCE_BPS);
+      const { txHash } = await callAsWallet(activeWallet, marketId, 'buy', {
+        prediction: side,
+        collateral_amount: stroops.toString(),
+        min_shares_out: minSharesOut.toString(),
+      });
+      setTxResult(txHash);
+      await invalidateAfterTrade(queryClient, { kind: 'market', id: marketId, address: activeWallet.address });
+    } catch (err) {
+      setTxError(messageFromApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRedeem() {
+    if (!wallet) return;
+    setBusy(true);
+    setTxError(null);
+    setTxResult(null);
+    try {
+      const { txHash } = await callAsWallet(wallet, marketId, 'redeem', {});
+      setTxResult(txHash);
+      await invalidateAfterTrade(queryClient, { kind: 'market', id: marketId, address: wallet.address });
+    } catch (err) {
+      setTxError(messageFromApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const pos = position ? { yes: BigInt(position.yes), no: BigInt(position.no) } : null;
+  const onChainStatus = (state?.status ?? null) as MarketStatus | null;
+  const canRedeem = pos && onChainStatus && onChainStatus !== 'Open' && redeemableValue(onChainStatus, pos) > 0n;
+
+  return (
+    <Card className={className}>
+      <CardBody className={bodyClassName}>
+        {!isOpen ? (
+          <div className="space-y-3">
+            {pos && (pos.yes > 0n || pos.no > 0n) && onChainStatus && onChainStatus !== 'Open' ? (
+              <ResultReveal
+                status={onChainStatus}
+                position={pos}
+                nextRoundHref={nextRound ? `/market/${nextRound.contractId}?rolloverFrom=${marketId}` : undefined}
+              />
+            ) : (
+              <p className="text-sm text-[var(--muted)]">Trading is closed.</p>
+            )}
+            {canRedeem && (
+              <Button className="w-full" onClick={handleRedeem} disabled={busy}>
+                {busy ? 'Redeeming…' : 'Redeem'}
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant={side === 'Yes' ? 'yes' : 'outline'} onClick={() => setSide('Yes')}>
+                YES
+              </Button>
+              <Button variant={side === 'No' ? 'no' : 'outline'} onClick={() => setSide('No')}>
+                NO
+              </Button>
+            </div>
+            <label className="block text-xs font-medium text-[var(--muted)]">
+              Amount (XLM)
+              <input
+                className="mt-1 h-10 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                inputMode="decimal"
+              />
+            </label>
+            {rolloverAmount > 0n && (
+              <p className="text-[11px] text-[var(--faint)]">
+                Funded by your {stroopsToXlm(rolloverAmount)} XLM winnings from last round
+              </p>
+            )}
 
 /* … truncated 3800 chars — edit only what you need near the top … */

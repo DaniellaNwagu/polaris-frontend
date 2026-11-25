@@ -7,6 +7,7 @@ import { useAdminKey } from '@/lib/admin-key-provider';
 import { Card, CardBody } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { shortAddress, formatDateTime } from '@/lib/format';
+import { qk } from '@/lib/query-keys';
 
 function maskEmail(email: string): string {
   const at = email.lastIndexOf('@');
@@ -20,7 +21,7 @@ export default function AdminWalletsPage() {
   const { adminKey } = useAdminKey();
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
   const { data, isLoading } = useQuery({
-    queryKey: ['admin', 'wallets', adminKey],
+    queryKey: qk.admin.wallets(adminKey),
     queryFn: () => api.getAdminWallets(adminKey),
     refetchInterval: 30_000,
   });

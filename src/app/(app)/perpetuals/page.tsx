@@ -4,10 +4,46 @@ import { api } from '@/lib/api';
 import { Card, CardBody } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { statusLabel } from '@/lib/format';
-import { PerpetualCard } from './perpetual-card';
-import { PerpetualsList } from './perpetuals-list';
+import { qk } from '@/lib/query-keys';
 
-export const revalidate = 30;
+function PerpetualCard({ contractId }: { contractId: string }) {
+  const { data: perpetual } = useQuery({
+    queryKey: qk.perpetual.detail(contractId),
+    queryFn: () => api.getPerpetual(contractId),
+  });
+  const { data: price } = useQuery({
+    queryKey: qk.perpetual.price(contractId),
+    queryFn: () => api.getPerpetualPrice(contractId),
+    enabled: perpetual?.status === 'watching',
+    refetchInterval: 15_000,
+  });
+
+  if (!perpetual) return null;
+
+  return (
+    <Link href={`/perpetual/${contractId}`}>
+      <Card className="transition-shadow hover:shadow-md">
+        <CardBody>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--faint)]">XLM/USD</span>
+            <Badge tone={perpetual.status === 'watching' ? 'accent' : 'neutral'}>
+              {statusLabel(perpetual.status)}
+            </Badge>
+          </div>
+          <h3 className="mb-3 text-lg font-semibold">XLM/USD perpetual</h3>
+          {price ? (
+            <OddsBar yesBps={price.yesBps} noBps={price.noBps} />
+          ) : (
+            <div className="h-2 w-full rounded-full bg-[var(--surface-2)]" />
+          )}
+          <div className="mt-3 text-xs text-[var(--muted)]">
+            {perpetual.status === 'watching' ? 'continuous — no expiry' : 'terminated'}
+          </div>
+        </CardBody>
+      </Card>
+    </Link>
+  );
+}
 
 /**
  * `polaris-perpetual`'s own list page — a separate route from `/markets`,
@@ -20,24 +56,12 @@ export const revalidate = 30;
  * so the initial HTML contains the rows, then React Query is hydrated on the
  * client so polling continues after hydration.
  */
-export default async function AllPerpetualsPage() {
-  const queryClient = new QueryClient();
-
-  let error: Error | null = null;
-  try {
-    await queryClient.prefetchQuery({
-      queryKey: ['perpetuals'],
-      queryFn: api.listPerpetuals,
-    });
-  } catch (e) {
-    error = e as Error;
-    // Log the raw error (path/status/body) for debugging; never render it.
-    console.error('Failed to load perpetuals', e);
-  }
-
-  const perpetuals = queryClient.getQueryData<Awaited<ReturnType<typeof api.listPerpetuals>>>([
-    'perpetuals',
-  ]);
+export default function AllPerpetualsPage() {
+  const { data: perpetuals, isLoading, error } = useQuery({
+    queryKey: qk.perpetuals.list(),
+    queryFn: api.listPerpetuals,
+    refetchInterval: 30_000,
+  });
 
   return (
     <div>

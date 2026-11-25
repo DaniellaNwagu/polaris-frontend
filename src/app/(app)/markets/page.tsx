@@ -1,29 +1,127 @@
-import Link from "next/link";
-import { prisma } from "@/lib/prisma";
-import { formatCurrency, formatPercent } from "@/lib/format";
+'use client';
 
-export const dynamic = "force-dynamic";
+import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { centsToUsd, formatCountdown, statusLabel } from '@/lib/format';
+import { qk } from '@/lib/query-keys';
 
-function timeUntil(date: Date): string {
-  const diff = date.getTime() - Date.now();
-  if (diff <= 0) return "closed";
-  const hours = Math.floor(diff / (1000 * 60 * 60));
-  if (hours >= 24) {
-    const days = Math.floor(hours / 24);
-    return `${days}d`;
-  }
-  if (hours >= 1) return `${hours}h`;
-  const minutes = Math.max(1, Math.floor(diff / (1000 * 60)));
-  return `${minutes}m`;
+function statusTone(status: string): 'yes' | 'no' | 'warn' | 'neutral' {
+  if (status === 'settled') return 'yes';
+  if (status === 'cancelled') return 'no';
+  if (status === 'pending') return 'warn';
+  return 'neutral';
 }
 
-export default async function MarketsPage() {
-  const markets = await prisma.market.findMany({
-    where: { status: "OPEN" },
-    orderBy: { closesAt: "asc" },
-    include: {
-      _count: { select: { positions: true } },
-    },
+/**
+ * `null` (never `0`) means "no history to compare against yet" — a market
+ * younger than the backend's snapshot window, or the snapshot service
+ * hasn't run long enough since a fresh deploy. Rendered as a plain dash,
+ * not a fabricated "+0%", so it reads as "not enough data" rather than
+ * "hasn't moved" — see `polaris-oracle`'s `GET /markets/:id/price` doc
+ * comment for why that distinction is made server-side too.
+ */
+function ChgCell({ yesBpsChange }: { yesBpsChange: number | null | undefined }) {
+  if (yesBpsChange === null || yesBpsChange === undefined) {
+    return <span className="text-[var(--faint)]">—</span>;
+  }
+  const pct = Math.round(yesBpsChange / 100);
+  const color = pct > 0 ? 'var(--yes)' : pct < 0 ? 'var(--no)' : 'var(--muted)';
+  const sign = pct > 0 ? '+' : '';
+  return <span style={{ color }}>{sign}{pct}%</span>;
+}
+
+/**
+ * A dense, ticker-style row rather than the old card grid — one line per
+ * market, right-aligned tabular odds instead of a full odds bar, so a
+ * growing list of markets scans like a watchlist instead of a stack of
+ * tiles. "Chg" is the YES odds' real move against `polaris-oracle`'s
+ * recorded history (default a 1h lookback) — see `ChgCell`'s doc comment
+ * for the null-vs-zero distinction.
+ */
+function MarketRow({ contractId }: { contractId: string }) {
+  const { data: market } = useQuery({
+    queryKey: qk.market.detail(contractId),
+    queryFn: () => api.getMarket(contractId),
+  });
+  const { data: price } = useQuery({
+    queryKey: qk.market.price(contractId),
+    queryFn: () => api.getPrice(contractId),
+    enabled: market?.status === 'watching',
+    refetchInterval: 15_000,
+  });
+
+  if (!market) return null;
+
+  const yesPct = price ? Math.round(price.yesBps / 100) : undefined;
+  const noPct = price ? Math.round(price.noBps / 100) : undefined;
+  const isOpen = market.status === 'watching';
+
+  return (
+    <Link
+      href={`/market/${contractId}`}
+      className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-x-3 px-4 py-3 transition-colors hover:bg-[var(--surface-2)] sm:gap-x-5 sm:px-5"
+    >
+      <span
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+        style={{ background: isOpen ? 'var(--brand-gradient)' : 'var(--faint)' }}
+      >
+        XL
+      </span>
+
+      <span className="min-w-0">
+        <span className="block truncate font-semibold">XLM/USD</span>
+        <span className="block truncate text-xs text-[var(--muted)]">
+          ≥ {centsToUsd(market.strikePriceCents)}
+        </span>
+      </span>
+
+      <span className="text-right font-mono text-sm tabular-nums">
+        {yesPct !== undefined ? (
+          <span style={{ color: 'var(--yes)' }}>{yesPct}%</span>
+        ) : (
+          <span className="text-[var(--faint)]">—</span>
+        )}
+        <span className="block text-[10px] uppercase tracking-wide text-[var(--faint)]">Yes</span>
+      </span>
+
+      <span className="text-right font-mono text-sm tabular-nums">
+        {noPct !== undefined ? (
+          <span style={{ color: 'var(--no)' }}>{noPct}%</span>
+        ) : (
+          <span className="text-[var(--faint)]">—</span>
+        )}
+        <span className="block text-[10px] uppercase tracking-wide text-[var(--faint)]">No</span>
+      </span>
+
+      <span className="text-right font-mono text-sm tabular-nums">
+        <ChgCell yesBpsChange={price?.yesBpsChange} />
+        <span className="block text-[10px] uppercase tracking-wide text-[var(--faint)]">Chg</span>
+      </span>
+
+      <span className="hidden text-right sm:block">
+        <Badge tone={statusTone(market.status)}>{statusLabel(market.status)}</Badge>
+        <span className="mt-1 block text-xs text-[var(--muted)]">
+          {isOpen ? formatCountdown(market.expiry) : 'closed'}
+        </span>
+      </span>
+    </Link>
+  );
+}
+
+/**
+ * The full-list view — every market, every status. Not the primary landing
+ * experience anymore (see `(app)/page.tsx`'s curated single-market view),
+ * but nothing here was removed: this is the "browse everything" fallback
+ * linked from there, now a watchlist-style list rather than a card grid.
+ */
+export default function AllMarketsPage() {
+  const { data: markets, isLoading, error } = useQuery({
+    queryKey: qk.markets.list(),
+    queryFn: api.listMarkets,
+    refetchInterval: 30_000,
   });
 
   return (

@@ -22,6 +22,8 @@ import {
 import { estimateBuyOut, withSlippageTolerance } from '@/lib/amm';
 import type { MarketStatus } from '@/lib/portfolio';
 import { useNextRound } from '@/lib/use-next-round';
+import { LogoMark } from '@/components/logo-mark';
+import { invalidateAfterTrade, qk } from '@/lib/query-keys';
 
 const SLIPPAGE_TOLERANCE_BPS = 200; // 2%
 
@@ -85,18 +87,18 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
   }, []);
 
   const { data: market } = useQuery({
-    queryKey: ['market', id],
+    queryKey: qk.market.detail(id),
     queryFn: () => api.getMarket(id),
     refetchInterval: (query) => (isPollableStatus(query.state.data?.status) ? RESOLUTION_POLL_MS : false),
   });
   const { data: price } = useQuery({
-    queryKey: ['price', id],
+    queryKey: qk.market.price(id),
     queryFn: () => api.getPrice(id),
     refetchInterval: 15_000,
     enabled: market?.status === 'watching',
   });
   const { data: state } = useQuery({
-    queryKey: ['state', id],
+    queryKey: qk.market.state(id),
     queryFn: () => api.getMarketState(id),
     // Was gated to only fetch while 'watching' — but the result moment
     // needs the resolved state (final price, pool balances) right after
@@ -104,13 +106,13 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
     refetchInterval: isPollableStatus(market?.status) ? RESOLUTION_POLL_MS : false,
   });
   const { data: fee } = useQuery({
-    queryKey: ['fee', id],
+    queryKey: qk.market.fee(id),
     queryFn: () => api.getFee(id),
     enabled: market?.status === 'watching',
     refetchInterval: 15_000,
   });
   const { data: position } = useQuery({
-    queryKey: ['position', id, wallet?.address],
+    queryKey: qk.market.position(id, wallet?.address),
     queryFn: () => api.getPosition(id, wallet!.address),
     enabled: !!wallet,
   });
@@ -215,8 +217,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
         min_shares_out: minSharesOut.toString(),
       });
       setTxResult(txHash);
-      postToHost('polaris:trade', { side, txHash });
-      await queryClient.invalidateQueries({ queryKey: ['price', id] });
+      await invalidateAfterTrade(queryClient, { kind: 'market', id, address: activeWallet.address });
     } catch (err) {
       setTxError(messageFromApiError(err));
     } finally {
@@ -235,13 +236,7 @@ export default function EmbedMarketPage({ params }: { params: Promise<{ id: stri
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 text-xs font-semibold text-[var(--faint)] hover:text-[var(--accent-ink)]"
             >
-              <span
-                aria-hidden="true"
-                className="flex h-4 w-4 items-center justify-center rounded text-white"
-                style={{ background: 'linear-gradient(135deg, #5b4fe0, #8b7bff)', fontSize: 9 }}
-              >
-                ◈
-              </span>
+              <LogoMark size="xs" />
               Polaris
             </a>
             {!isOpen && <span className="text-xs text-[var(--faint)]">{statusLabel(market.status)}</span>}
