@@ -65,6 +65,14 @@ export function TradeCard({
   const [txResult, setTxResult] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
 
+  // Clear the previous outcome message whenever the user changes the side or
+  // amount — otherwise a "Confirmed"/error from a trade they no longer have
+  // on screen keeps sitting under a form describing a different trade.
+  useEffect(() => {
+    setTxResult(null);
+    setTxError(null);
+  }, [side, amount]);
+
   const { data: market } = useQuery({
     queryKey: ['market', marketId],
     queryFn: () => api.getMarket(marketId),
@@ -99,19 +107,40 @@ export function TradeCard({
   });
   const nextRound = useNextRound(market);
 
-  const { data: rolloverState } = useQuery({
-    queryKey: ['state', rolloverFromMarketId],
-    queryFn: () => api.getMarketState(rolloverFromMarketId!),
+  // `rolloverFromMarketId` comes straight from a URL query param, so it is
+  // attacker-controlled: anyone can share `/market/<real>?rolloverFrom=<any
+  // contract id>`. Only honor it when it names a market the backend actually
+  // tracks, on the same feed as this one, already terminal, and created
+  // before this market — the exact relationship `useNextRound` defines. An
+  // unknown/unrelated id must never reach `callAsWallet`'s redeem path.
+  const { data: rolloverMarket } = useQuery({
+    queryKey: ['market', rolloverFromMarketId],
+    queryFn: () => api.getMarket(rolloverFromMarketId!),
     enabled: !!rolloverFromMarketId,
+    retry: false,
+  });
+  const rolloverValid =
+    !!rolloverMarket &&
+    !!market &&
+    rolloverMarket.id !== market.id &&
+    rolloverMarket.feedId === market.feedId &&
+    rolloverMarket.status !== 'watching' &&
+    rolloverMarket.createdAt < market.createdAt;
+  const validatedRolloverId = rolloverValid ? rolloverFromMarketId : undefined;
+
+  const { data: rolloverState } = useQuery({
+    queryKey: ['state', validatedRolloverId],
+    queryFn: () => api.getMarketState(validatedRolloverId!),
+    enabled: !!validatedRolloverId,
   });
   const { data: rolloverPosition } = useQuery({
-    queryKey: ['position', rolloverFromMarketId, wallet?.address],
-    queryFn: () => api.getPosition(rolloverFromMarketId!, wallet!.address),
-    enabled: !!rolloverFromMarketId && !!wallet,
+    queryKey: ['position', validatedRolloverId, wallet?.address],
+    queryFn: () => api.getPosition(validatedRolloverId!, wallet!.address),
+    enabled: !!validatedRolloverId && !!wallet,
   });
   const rolloverStatus = (rolloverState?.status ?? null) as MarketStatus | null;
   const rolloverAmount =
-    rolloverStatus && rolloverStatus !== 'Open' && rolloverPosition
+    validatedRolloverId && rolloverStatus && rolloverStatus !== 'Open' && rolloverPosition
       ? redeemableValue(rolloverStatus, { yes: BigInt(rolloverPosition.yes), no: BigInt(rolloverPosition.no) })
       : 0n;
 
@@ -125,13 +154,23 @@ export function TradeCard({
     }
   }, [rolloverAmount]);
 
-  const payoutPreview = useMemo(() => {
+  // Single source of truth for the quote: the payout shown, the minimum
+  // shown, and the `min_shares_out` submitted by `handleTrade` all derive
+  // from this one computation, so the preview can never drift from what's
+  // actually sent on-chain.
+  const preview = useMemo(() => {
     if (!state || !fee) return null;
     try {
       const stroops = xlmToStroops(amount);
       if (stroops <= 0n) return null;
       const bonus = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
-      return stroopsToXlm((stroops + bonus).toString());
+      const estimate = stroops + bonus;
+      const minSharesOut = withSlippageTolerance(estimate, SLIPPAGE_TOLERANCE_BPS);
+      return {
+        payout: stroopsToXlm(estimate.toString()),
+        minSharesOut,
+        minReceived: stroopsToXlm(minSharesOut.toString()),
+      };
     } catch {
       return null;
     }
@@ -157,6 +196,15 @@ export function TradeCard({
       <Card className={className}>
         <CardBody className={bodyClassName}>
           <p className="text-sm text-[var(--muted)]">Loading…</p>
+        </CardBody>
+      </Card>
+    );
+  }
+  if (!market) {
+    return (
+      <Card className={className}>
+        <CardBody className={bodyClassName}>
+          <p className="text-sm text-[var(--muted)]">Market unavailable.</p>
         </CardBody>
       </Card>
     );

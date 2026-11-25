@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { stroopsToXlm, xlmToStroops, shortAddress } from '@/lib/format';
 import { redeemableValue } from '@/lib/portfolio';
 import { estimateBuyOut, withSlippageTolerance } from '@/lib/amm';
+import { explorerTxUrl } from '@/lib/explorer';
 
 /** Same floor as `TradeCard` — see its doc comment. */
 const SLIPPAGE_TOLERANCE_BPS = 200;
@@ -48,7 +49,7 @@ export function PerpetualTradeCard({
   const [txResult, setTxResult] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
 
-  const { data: perpetual } = useQuery({
+  const { data: perpetual, isLoading } = useQuery({
     queryKey: ['perpetual', perpetualId],
     queryFn: () => api.getPerpetual(perpetualId),
   });
@@ -79,13 +80,20 @@ export function PerpetualTradeCard({
     enabled: !!wallet,
   });
 
-  const payoutPreview = useMemo(() => {
+  // Computed once here and reused by both the preview and `handleTrade` so
+  // the displayed "minimum if price moves" is exactly the `min_shares_out`
+  // actually submitted.
+  const preview = useMemo(() => {
     if (!state || !fee) return null;
     try {
       const stroops = xlmToStroops(amount);
       if (stroops <= 0n) return null;
-      const bonus = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
-      return stroopsToXlm((stroops + bonus).toString());
+      const estimate = estimateBuyOut(side, stroops, BigInt(state.poolYes), BigInt(state.poolNo), fee.feeBps);
+      const minSharesOut = withSlippageTolerance(estimate, SLIPPAGE_TOLERANCE_BPS);
+      return {
+        payout: stroopsToXlm((stroops + estimate).toString()),
+        minSharesOut: stroopsToXlm(minSharesOut.toString()),
+      };
     } catch {
       return null;
     }
@@ -111,6 +119,15 @@ export function PerpetualTradeCard({
       <Card className={className}>
         <CardBody className={bodyClassName}>
           <p className="text-sm text-[var(--muted)]">Loading…</p>
+        </CardBody>
+      </Card>
+    );
+  }
+  if (!perpetual) {
+    return (
+      <Card className={className}>
+        <CardBody className={bodyClassName}>
+          <p className="text-sm text-[var(--muted)]">Perpetual unavailable.</p>
         </CardBody>
       </Card>
     );
@@ -174,6 +191,18 @@ export function PerpetualTradeCard({
     }
   }
 
+  function handleSideChange(next: 'Yes' | 'No') {
+    setSide(next);
+    setTxResult(null);
+    setTxError(null);
+  }
+
+  function handleAmountChange(next: string) {
+    setAmount(next);
+    setTxResult(null);
+    setTxError(null);
+  }
+
   const pos = position ? { yes: BigInt(position.yes), no: BigInt(position.no) } : null;
   // `Terminated`'s payout is the exact same 0.5-collateral-per-complementary-pair
   // formula as a classic market's `Cancelled` — same reused math (see
@@ -204,10 +233,10 @@ export function PerpetualTradeCard({
         ) : (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
-              <Button variant={side === 'Yes' ? 'yes' : 'outline'} onClick={() => setSide('Yes')}>
+              <Button variant={side === 'Yes' ? 'yes' : 'outline'} onClick={() => handleSideChange('Yes')}>
                 YES
               </Button>
-              <Button variant={side === 'No' ? 'no' : 'outline'} onClick={() => setSide('No')}>
+              <Button variant={side === 'No' ? 'no' : 'outline'} onClick={() => handleSideChange('No')}>
                 NO
               </Button>
             </div>
@@ -216,15 +245,15 @@ export function PerpetualTradeCard({
               <input
                 className="mt-1 h-10 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => handleAmountChange(e.target.value)}
                 inputMode="decimal"
               />
             </label>
 
             <div className="rounded-lg bg-[var(--surface-2)] px-3 py-2.5 text-sm">
-              {payoutPreview ? (
+              {preview ? (
                 <>
-                  You get <span className="font-semibold">{payoutPreview} XLM</span> of {side.toUpperCase()}{' '}
+                  You get <span className="font-semibold">{preview.payout} XLM</span> of {side.toUpperCase()}{' '}
                   <span className="text-[var(--faint)]">(you stake {amount || '0'} XLM)</span>
                 </>
               ) : (
