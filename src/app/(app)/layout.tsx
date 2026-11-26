@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useWallet } from '@/lib/wallet-provider';
@@ -12,6 +13,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { wallet, error } = useWallet();
   const portfolio = usePortfolioValue();
   const pathname = usePathname();
+  const [theme, setTheme] = useState<'light' | 'dark' | null>(null);
+  useEffect(() => {
+    setTheme((document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || null);
+  }, []);
+  function toggleTheme() {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('theme', next); } catch (_) {}
+    setTheme(next);
+  }
 
   return (
     <div className="min-h-screen">
@@ -67,6 +78,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 {stroopsToXlm(portfolio.total)} XLM in play
               </Link>
             )}
+            <button
+              onClick={toggleTheme}
+              aria-label="Toggle light/dark theme"
+              className="rounded border border-[var(--line)] px-2 py-1 text-xs hover:bg-[var(--surface-2)]"
+            >
+              {theme === 'dark' ? '☀︎' : '☾'}
+            </button>
             <AuthControls />
           </div>
         </div>
