@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Market } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
@@ -8,12 +9,10 @@ import { centsToUsd, shortAddress } from '@/lib/format';
 import { qk } from '@/lib/query-keys';
 
 export default function AdminMarketsPage() {
-  const [markets, setMarkets] = useState<Market[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>('attention');
 
-  const { data: markets } = useQuery({ queryKey: qk.markets.list(), queryFn: api.listMarkets });
+  const { data: markets, isLoading } = useQuery({ queryKey: qk.markets.list(), queryFn: api.listMarkets });
 
   async function act(action: 'settle' | 'cancel', contractId: string) {
     setBusyId(contractId);
@@ -63,7 +62,7 @@ export default function AdminMarketsPage() {
         ))}
       </div>
 
-      {loading ? (
+      {isLoading ? (
         <p className="text-sm text-[var(--ink-soft)]">Loading markets…</p>
       ) : error ? (
         <p className="text-sm text-[var(--no)]">{error}</p>
