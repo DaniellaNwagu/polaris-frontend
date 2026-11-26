@@ -19,11 +19,14 @@ export function stroopsToXlm(stroops: string | bigint, fractionDigits = 2): stri
  */
 export function xlmToStroops(xlm: string): bigint {
   const trimmed = xlm.trim();
-  if (!/^\d+(\.\d+)?$/.test(trimmed)) {
+  if (!/^(\d+(\.\d+)?|\.\d+)$/.test(trimmed)) {
     throw new Error('Enter a valid amount, e.g. 10 or 10.5');
   }
   const [whole, frac = ''] = trimmed.split('.');
-  const fracPadded = (frac + '0000000').slice(0, 7);
+  if (frac.length > 7) {
+    throw new Error('XLM supports at most 7 decimal places');
+  }
+  const fracPadded = frac.padEnd(7, '0');
   return BigInt(whole || '0') * STROOPS_PER_XLM + BigInt(fracPadded || '0');
 }
 
