@@ -1,11 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, messageFromApiError, type WatchedMarket } from '@/lib/api';
-import { useAdminKey } from '@/lib/admin-key-provider';
-import { Card, CardBody } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import type { Market } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/cn';
 import { centsToUsd, shortAddress } from '@/lib/format';
@@ -34,18 +32,11 @@ const FILTERS: { key: FilterKey; label: string; match: (market: WatchedMarket) =
 
 /** Relocated from `(app)/admin/page.tsx` verbatim (minus the admin-key input, now handled once by `admin/layout.tsx`'s gate) as part of the dashboard rebuild — see the other `admin/*` pages for what's actually new. */
 export default function AdminMarketsPage() {
-  const { adminKey } = useAdminKey();
-  const queryClient = useQueryClient();
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [filter, setFilter] = useState<FilterKey>('attention');
 
-  const {
-    data: markets,
-    error: loadError,
-    isLoading,
-  } = useQuery({ queryKey: qk.markets.list(), queryFn: api.listMarkets });
+  const { data: markets, isLoading } = useQuery({ queryKey: qk.markets.list(), queryFn: api.listMarkets });
 
   async function act(action: 'settle' | 'cancel', contractId: string) {
     setBusyId(contractId);
@@ -93,12 +84,28 @@ export default function AdminMarketsPage() {
         ))}
       </div>
 
-      {isLoading && <p className="text-sm text-[var(--muted)]">Loading…</p>}
-      {loadError && !markets && (
-        <p className="text-sm text-[var(--no)] break-all">{messageFromApiError(loadError)}</p>
-      )}
-      {markets && visibleMarkets.length === 0 && (
-        <p className="text-sm text-[var(--faint)]">No markets match this filter.</p>
+      {isLoading ? (
+        <p className="text-sm text-[var(--ink-soft)]">Loading markets…</p>
+      ) : error ? (
+        <p className="text-sm text-[var(--no)]">{error}</p>
+      ) : visibleMarkets.length === 0 ? (
+        <p className="text-sm text-[var(--ink-soft)]">No markets match this filter.</p>
+      ) : (
+        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {visibleMarkets.map((market) => (
+            <li key={market.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="flex items-start justify-between gap-2">
+                <h2 className="text-sm font-semibold">{market.question}</h2>
+                <Badge tone={market.lastError ? 'no' : market.status === 'pending' ? 'warn' : 'neutral'}>
+                  {market.status}
+                </Badge>
+              </div>
+              {market.lastError ? (
+                <p className="mt-2 text-xs text-[var(--no)]">{market.lastError}</p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
       )}
 
       <div className="space-y-3">
