@@ -6,23 +6,14 @@ import { usePathname } from 'next/navigation';
 import { useWallet } from '@/lib/wallet-provider';
 import { usePortfolioValue } from '@/lib/use-portfolio-value';
 import { AuthControls } from '@/components/auth-controls';
-import { stroopsToXlm } from '@/lib/format';
+import { useFormatStroops } from '@/lib/display-currency';
 import { LogoMark } from '@/components/logo-mark';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { wallet, error } = useWallet();
   const portfolio = usePortfolioValue();
   const pathname = usePathname();
-  const [theme, setTheme] = useState<'light' | 'dark' | null>(null);
-  useEffect(() => {
-    setTheme((document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || null);
-  }, []);
-  function toggleTheme() {
-    const next = theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    try { localStorage.setItem('theme', next); } catch (_) {}
-    setTheme(next);
-  }
+  const formatStroops = useFormatStroops();
 
   return (
     <div className="min-h-screen">
@@ -67,6 +58,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             >
               Docs
             </Link>
+            <Link
+              href="/settings"
+              aria-current={pathname === '/settings' ? 'page' : undefined}
+              className="hover:text-[var(--ink)]"
+            >
+              Settings
+            </Link>
           </nav>
           <div className="flex items-center gap-2">
             {wallet && portfolio?.hasPosition && (
@@ -74,8 +72,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 href="/bets"
                 className="rounded-full bg-[var(--surface-2)] px-3 py-1.5 text-xs font-semibold hover:opacity-80"
               >
-                {portfolio.incomplete ? '≥ ' : ''}
-                {stroopsToXlm(portfolio.total)} XLM in play
+                {formatStroops(portfolio.total)} in play
               </Link>
             )}
             <button

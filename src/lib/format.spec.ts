@@ -1,22 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { xlmToStroops } from './format';
+import { formatStroops, isDisplayCurrency } from './format';
 
-describe('xlmToStroops', () => {
-  it.each([
-    ['10', 100_000_000n],
-    ['10.5', 105_000_000n],
-    ['.5', 5_000_000n],
-    ['0.0000001', 1n],
-    [' 1 ', 10_000_000n],
-  ])('converts %j', (input, expected) => {
-    expect(xlmToStroops(input)).toBe(expected);
+describe('formatStroops', () => {
+  it('defaults to XLM', () => {
+    expect(formatStroops('123456789')).toBe('12.34 XLM');
   });
 
-  it.each(['10.123456789', '.12345678'])('rejects excess precision in %j', (input) => {
-    expect(() => xlmToStroops(input)).toThrow('XLM supports at most 7 decimal places');
+  it('formats stroops with thousands separators', () => {
+    expect(formatStroops('123456789', 'stroops')).toBe('123,456,789 stroops');
+    expect(formatStroops(5n, 'stroops')).toBe('5 stroops');
   });
 
-  it.each(['', '.', '10.', '1,000', '-1', 'abc'])('rejects %j', (input) => {
-    expect(() => xlmToStroops(input)).toThrow('Enter a valid amount');
+  it('converts to a USD estimate at the given XLM price in cents', () => {
+    // 10 XLM at 25 cents each = $2.50
+    expect(formatStroops('100000000', 'usd', 25)).toBe('≈ $2.50');
+  });
+
+  it('falls back to XLM when the USD rate is missing or invalid', () => {
+    expect(formatStroops('100000000', 'usd')).toBe('10.00 XLM');
+    expect(formatStroops('100000000', 'usd', null)).toBe('10.00 XLM');
+    expect(formatStroops('100000000', 'usd', 0)).toBe('10.00 XLM');
+    expect(formatStroops('100000000', 'usd', Number.NaN)).toBe('10.00 XLM');
+  });
+
+  it('accepts bigint and string input alike', () => {
+    expect(formatStroops(100000000n, 'xlm')).toBe(formatStroops('100000000', 'xlm'));
+  });
+});
+
+describe('isDisplayCurrency', () => {
+  it('accepts only the three supported currencies', () => {
+    expect(isDisplayCurrency('stroops')).toBe(true);
+    expect(isDisplayCurrency('xlm')).toBe(true);
+    expect(isDisplayCurrency('usd')).toBe(true);
+    expect(isDisplayCurrency('eur')).toBe(false);
+    expect(isDisplayCurrency(null)).toBe(false);
   });
 });
