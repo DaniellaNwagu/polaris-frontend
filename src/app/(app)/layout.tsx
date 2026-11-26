@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useWallet } from '@/lib/wallet-provider';
@@ -74,6 +75,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 {formatStroops(portfolio.total)} in play
               </Link>
             )}
+            <button
+              onClick={toggleTheme}
+              aria-label="Toggle light/dark theme"
+              className="rounded border border-[var(--line)] px-2 py-1 text-xs hover:bg-[var(--surface-2)]"
+            >
+              {theme === 'dark' ? '☀︎' : '☾'}
+            </button>
             <AuthControls />
           </div>
         </div>

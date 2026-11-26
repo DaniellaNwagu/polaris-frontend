@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { centsToUsd, formatCountdown, statusLabel } from '@/lib/format';
+import { centsToUsd, statusLabel } from '@/lib/format';
 import { qk } from '@/lib/query-keys';
 import { useWatchlist } from '@/lib/watchlist';
 import { cn } from '@/lib/cn';
@@ -16,6 +16,21 @@ function statusTone(status: string): 'yes' | 'no' | 'warn' | 'neutral' {
   if (status === 'cancelled') return 'no';
   if (status === 'pending') return 'warn';
   return 'neutral';
+}
+
+/**
+ * Formats a bps change into a signed percentage string. Sub-1% moves (the
+ * common case on a 1h lookback) keep one decimal place so a real 40 bps
+ * move reads as "+0.4%" instead of collapsing to "+0%"; at/above 1% we
+ * round to a whole percent to keep the column compact.
+ */
+export function formatBpsChange(yesBpsChange: number): string {
+  const pct = yesBpsChange / 100;
+  const sign = pct > 0 ? '+' : '';
+  if (Math.abs(pct) < 1) {
+    return `${sign}${pct.toFixed(1)}%`;
+  }
+  return `${sign}${Math.round(pct)}%`;
 }
 
 /**
@@ -30,15 +45,9 @@ function ChgCell({ yesBpsChange }: { yesBpsChange: number | null | undefined }) 
   if (yesBpsChange === null || yesBpsChange === undefined) {
     return <span className="text-[var(--faint)]">—</span>;
   }
-  const pct = Math.round(yesBpsChange / 100);
-  const color = pct > 0 ? 'var(--yes)' : pct < 0 ? 'var(--no)' : 'var(--muted)';
-  const sign = pct > 0 ? '+' : '';
-  return (
-    <span style={{ color }}>
-      {sign}
-      {pct}%
-    </span>
-  );
+  const color =
+    yesBpsChange > 0 ? 'var(--yes)' : yesBpsChange < 0 ? 'var(--no)' : 'var(--muted)';
+  return <span style={{ color }}>{formatBpsChange(yesBpsChange)}</span>;
 }
 
 /**
@@ -86,11 +95,13 @@ function MarketRow({
     refetchInterval: 15_000,
   });
 
+  const isOpen = market?.status === 'watching';
+  const countdown = useCountdown(isOpen ? market?.expiry : undefined);
+
   if (!market) return null;
 
   const yesPct = price ? Math.round(price.yesBps / 100) : undefined;
   const noPct = price ? Math.round(price.noBps / 100) : undefined;
-  const isOpen = market.status === 'watching';
 
   return (
     <div className="flex items-center pl-2 sm:pl-3">
@@ -139,7 +150,7 @@ function MarketRow({
       <span className="hidden text-right sm:block">
         <Badge tone={statusTone(market.status)}>{statusLabel(market.status)}</Badge>
         <span className="mt-1 block text-xs text-[var(--muted)]">
-          {isOpen ? formatCountdown(market.expiry) : 'closed'}
+          {isOpen ? countdown : 'closed'}
         </span>
       </span>
     </Link>

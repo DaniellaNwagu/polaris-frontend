@@ -69,13 +69,27 @@ function PositionRow({ contractId }: { contractId: string }) {
   if (pos.yes === 0n && pos.no === 0n) return null;
 
   const status = state.status as MarketStatus;
+  // Open but price not loaded yet: don't compute a value from a missing
+  // price (redeemableValue('Open') is 0n by design) — show a placeholder.
   const value =
-    status === 'Open' && price ? markToMarket(pos, price.yesBps, price.noBps) : redeemableValue(status, pos);
+    status === 'Open'
+      ? price
+        ? markToMarket(pos, price.yesBps, price.noBps)
+        : null
+      : redeemableValue(status, pos);
   const win = didWin(status, pos);
+
+  const isRedeemable = status !== 'Open';
 
   return (
     <Link href={`/market/${contractId}`}>
       <Card className="transition-shadow hover:shadow-md">
+        {isRedeemable && (
+          <div className="flex items-center gap-1.5 rounded-t-[inherit] border-b border-[var(--accent)] bg-[var(--accent-soft)] px-4 py-1.5 text-xs font-medium text-[var(--accent-ink)]">
+            <span>Redeemable position — click to claim</span>
+            <span aria-hidden="true">→</span>
+          </div>
+        )}
         <CardBody className="flex items-center justify-between">
           <div>
             <div className="text-sm font-semibold">Will XLM be ≥ {centsToUsd(market.strikePriceCents)}?</div>
@@ -84,7 +98,7 @@ function PositionRow({ contractId }: { contractId: string }) {
             </div>
           </div>
           <div className="text-right">
-            <div className="text-sm font-semibold">{stroopsToXlm(value)} XLM</div>
+            <div className="text-sm font-semibold">{value === null ? '—' : `${stroopsToXlm(value)} XLM`}</div>
             <div className="mt-1">
               {win === true && <Badge tone="yes">won</Badge>}
               {win === false && <Badge tone="no">lost</Badge>}
@@ -143,8 +157,11 @@ function PerpetualPositionRow({ contractId }: { contractId: string }) {
   // `redeemableValue` only knows the classic-market status union, so
   // `'Cancelled'` is the equivalent case here, not a re-derivation of the
   // same math.
-  const value =
-    isOpen && price ? markToMarket(pos, price.yesBps, price.noBps) : redeemableValue('Cancelled', pos);
+  const value = isOpen
+    ? price
+      ? markToMarket(pos, price.yesBps, price.noBps)
+      : null
+    : redeemableValue('Cancelled', pos);
 
   return (
     <Link href={`/perpetual/${contractId}`}>
@@ -157,7 +174,7 @@ function PerpetualPositionRow({ contractId }: { contractId: string }) {
             </div>
           </div>
           <div className="text-right">
-            <div className="text-sm font-semibold">{stroopsToXlm(value)} XLM</div>
+            <div className="text-sm font-semibold">{value === null ? '—' : `${stroopsToXlm(value)} XLM`}</div>
             <div className="mt-1">
               <Badge tone={isOpen ? 'accent' : 'neutral'}>{isOpen ? 'mark-to-market' : 'terminated'}</Badge>
             </div>
