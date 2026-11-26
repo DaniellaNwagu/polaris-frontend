@@ -5,8 +5,9 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { centsToUsd, formatCountdown, statusLabel } from '@/lib/format';
+import { centsToUsd, statusLabel } from '@/lib/format';
 import { qk } from '@/lib/query-keys';
+import { useCountdown } from '@/lib/use-countdown';
 
 function statusTone(status: string): 'yes' | 'no' | 'warn' | 'neutral' {
   if (status === 'settled') return 'yes';
@@ -67,11 +68,13 @@ function MarketRow({ contractId }: { contractId: string }) {
     refetchInterval: 15_000,
   });
 
+  const isOpen = market?.status === 'watching';
+  const countdown = useCountdown(isOpen ? market?.expiry : undefined);
+
   if (!market) return null;
 
   const yesPct = price ? Math.round(price.yesBps / 100) : undefined;
   const noPct = price ? Math.round(price.noBps / 100) : undefined;
-  const isOpen = market.status === 'watching';
 
   return (
     <Link
@@ -118,7 +121,7 @@ function MarketRow({ contractId }: { contractId: string }) {
       <span className="hidden text-right sm:block">
         <Badge tone={statusTone(market.status)}>{statusLabel(market.status)}</Badge>
         <span className="mt-1 block text-xs text-[var(--muted)]">
-          {isOpen ? formatCountdown(market.expiry) : 'closed'}
+          {isOpen ? countdown : 'closed'}
         </span>
       </span>
     </Link>
