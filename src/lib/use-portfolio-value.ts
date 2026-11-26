@@ -17,7 +17,7 @@ import { qk } from '@/lib/query-keys';
  * ...)`), so the pill reflects *every* position the wallet holds, not just
  * classic-market ones.
  */
-export function usePortfolioValue(): { total: bigint; hasPosition: boolean } | null {
+export function usePortfolioValue(): { total: bigint; hasPosition: boolean; incomplete: boolean } | null {
   const { wallet } = useWallet();
   const { data: markets } = useQuery({ queryKey: ['markets'], queryFn: api.listMarkets, enabled: !!wallet });
   const { data: perpetuals } = useQuery({
@@ -72,7 +72,11 @@ export function usePortfolioValue(): { total: bigint; hasPosition: boolean } | n
   const results = [...marketResults, ...perpetualResults];
   if (results.some((r) => r.isLoading)) return null;
 
-  const values = results.map((r) => (r.data as bigint | undefined) ?? 0n);
+  // A row whose query errored has no value — it must not silently count as
+  // 0 in a total shown as exact. Sum what we know and flag the total as a
+  // lower bound so the header can render it as "≥ X".
+  const incomplete = results.some((r) => r.isError);
+  const values = results.filter((r) => !r.isError).map((r) => (r.data as bigint | undefined) ?? 0n);
   const total = values.reduce((sum, v) => sum + v, 0n);
-  return { total, hasPosition: values.some((v) => v > 0n) };
+  return { total, hasPosition: incomplete || values.some((v) => v > 0n), incomplete };
 }

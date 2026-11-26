@@ -63,6 +63,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 href="/bets"
                 className="rounded-full bg-[var(--surface-2)] px-3 py-1.5 text-xs font-semibold hover:opacity-80"
               >
+                {portfolio.incomplete ? '≥ ' : ''}
                 {stroopsToXlm(portfolio.total)} XLM in play
               </Link>
             )}
